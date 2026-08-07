@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fallback silhouette when density PNG monochrome is unavailable. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#000000"
+        android:pathData="M34,24c0,-2.2 1.8,-4 4,-4h4c2.2,0 4,1.8 4,4v60c0,2.2 -1.8,4 -4,4h-4c-2.2,0 -4,-1.8 -4,-4z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M38,34m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M38,54m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M38,74m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M50,26h30c4,0 7,3 7,7v10c0,4 -3,7 -7,7H50c-1.7,0 -3,-1.3 -3,-3V29c0,-1.7 1.3,-3 3,-3z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M50,46h32c4,0 7,3 7,7v10c0,4 -3,7 -7,7H50c-1.7,0 -3,-1.3 -3,-3V49c0,-1.7 1.3,-3 3,-3z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M50,66h26c4,0 7,3 7,7v10c0,4 -3,7 -7,7H50c-1.7,0 -3,-1.3 -3,-3V69c0,-1.7 1.3,-3 3,-3z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M78,78m-12,0a12,12 0,1 1,24 0a12,12 0,1 1,-24 0" />
+</vector>

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">追程</string>
+    <string name="date_pattern">yyyy年MM月dd日</string>
+
+    <string name="cd_batch_import">批量导入</string>
+    <string name="cd_add_event">添加日程</string>
+    <string name="cd_add_team">添加团队</string>
+    <string name="cd_back">返回</string>
+    <string name="cd_delete">删除</string>
+    <string name="cd_more">更多</string>
+    <string name="cd_prev_day">前一天</string>
+    <string name="cd_next_day">后一天</string>
+    <string name="cd_export">导出当日</string>
+    <string name="cd_clear_all">清空全部数据</string>
+
+    <string name="action_confirm">确定</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_delete">删除</string>
+    <string name="action_import">开始导入</string>
+    <string name="action_save_event">保存日程</string>
+    <string name="action_export">导出当日 CSV</string>
+    <string name="action_clear_all">清空全部数据</string>
+    <string name="action_back_to_today">返回今天</string>
+
+    <string name="stats_events">日程</string>
+    <string name="stats_busy">忙碌</string>
+    <string name="stats_free">空闲</string>
+    <string name="stats_conflict">冲突</string>
+
+    <string name="empty_timeline">暂无日程，点击右下角添加</string>
+    <string name="empty_nearest_future">最近日程还有 %1$d 天，点此查看</string>
+    <string name="empty_nearest_past">最近日程是 %1$d 天前，点此查看</string>
+    <string name="status_ongoing">正在进行：%1$s</string>
+    <string name="status_ongoing_multiple">%1$d 项正在进行：%2$s</string>
+    <string name="status_free">当前空闲</string>
+    <string name="status_none">当前无日程</string>
+    <string name="status_next">距离下个阶段「%1$s」还有 %2$s</string>
+
+    <string name="event_type_performance">演出</string>
+    <string name="event_type_tokuten">特典</string>
+    <string name="tokuten_kind_pre">前特</string>
+    <string name="tokuten_kind_parallel">平特</string>
+    <string name="tokuten_kind_final">终特</string>
+    <string name="event_untitled">未命名</string>
+    <string name="event_linked_performance">关联演出：%1$s %2$s</string>
+    <string name="event_linked_tokuten">关联特典：%1$s %2$s</string>
+
+    <string name="manage_data_title">设置</string>
+    <string name="manage_data_subtitle">外观、通知、导入导出与本地数据</string>
+    <string name="manage_data_section">数据</string>
+    <string name="theme_section">外观</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">浅色</string>
+    <string name="theme_dark">深色</string>
+    <string name="notification_section">通知</string>
+    <string name="notification_toggle_title">日程实时通知</string>
+    <string name="notification_toggle_summary">日程开始时提醒，并持续显示当前进度；Android 16 支持 Live Updates</string>
+    <string name="notification_always_on_title">显示未来日程</string>
+    <string name="notification_always_on_summary">开启后，没有进行中的日程时显示下一项未来日程；关闭后只显示当前日程</string>
+    <string name="notification_channel_name">日程实时更新</string>
+    <string name="notification_channel_description">日程开始提醒和当前行程进度</string>
+    <string name="notification_live_title_single">%1$s 正在进行</string>
+    <string name="notification_live_title_multiple">%1$d 项日程正在进行</string>
+    <string name="notification_live_title_upcoming">下一项：%1$s</string>
+    <string name="notification_live_content">%1$s · 至 %2$s</string>
+    <string name="notification_live_next_suffix">｜下一项：%1$s %2$s</string>
+    <string name="notification_live_upcoming_content">%1$s · %2$s %3$s 开始</string>
+    <string name="notification_short_text">进行中</string>
+    <string name="notification_island_suffix_opening">后开场</string>
+    <string name="notification_island_suffix_started">已开场</string>
+    <string name="notification_island_multi_title">%1$d 项日程</string>
+    <string name="notification_chip_verb_performance">开场</string>
+    <string name="notification_chip_verb_tokuten">开始</string>
+    <string name="notification_chip_today">%1$s %2$s</string>
+    <string name="notification_chip_later">%1$s %2$s</string>
+    <string name="notification_reminder_channel_name">日程提醒</string>
+    <string name="notification_reminder_channel_description">开始前 3 天、当天 0 点、前 1 小时的关键时间点提醒</string>
+    <string name="notification_reminder_text_three_days">3 天后（%1$s）%2$s 开始</string>
+    <string name="notification_reminder_text_midnight">今天 %1$s 开始</string>
+    <string name="notification_reminder_text_one_hour">1 小时后（%1$s）开始</string>
+    <string name="manage_import_summary">粘贴 CSV，一次录入多项</string>
+    <string name="manage_export_summary">分享当日行程为 CSV 文本</string>
+    <string name="manage_danger_zone">危险操作</string>
+    <string name="manage_clear_summary">永久删除全部日程与团队候选</string>
+    <string name="import_preview_title">可导入 %1$d 条</string>
+    <string name="import_invalid_format">格式错误或时间无效</string>
+    <string name="action_parse">解析文本</string>
+    <string name="import_hint">每行一条，逗号分隔；日期为 yyyy-MM-dd；特典多个团队用 / 分隔</string>
+    <string name="import_format_fields">日期 · 团队（可多项） · 类型 · 特典种类 · 场次说明 · 地点 · 开始 · 结束 · 备注（均可按列留空）</string>
+    <string name="import_sample_long_press">长按下方样例可复制</string>
+    <string name="import_sample_copied">已复制样例</string>
+    <string name="import_empty_preview">粘贴后将在此显示预览</string>
+
+    <string name="clear_all_title">清空全部数据？</string>
+    <string name="clear_all_message">将永久删除所有日程和团队候选，此操作无法撤销。</string>
+    <string name="clear_all_confirm">确认清空</string>
+
+    <string name="export_share_title">导出当日日程</string>
+    <string name="export_empty">当天没有可导出的日程</string>
+
+    <string name="edit_add_title">添加日程</string>
+    <string name="edit_edit_title">编辑日程</string>
+    <string name="edit_label_event_type">类型</string>
+    <string name="edit_label_tokuten_kind">特典种类</string>
+    <string name="edit_label_team_single">团队（单选，长按可删除候选）</string>
+    <string name="edit_label_teams_multiple">团队（可多选，长按可删除候选）</string>
+    <string name="edit_hint_team">例如：StarDiary</string>
+    <string name="edit_hint_teams_multiple">输入团队名，多个可用 / 分隔</string>
+    <string name="edit_team_relation_hint">同一天的演出与特典会按相同团队名称自动关联。</string>
+    <string name="edit_label_session">场次说明（可选）</string>
+    <string name="edit_hint_session">例如：午场、加演</string>
+    <string name="edit_label_location">地点</string>
+    <string name="edit_hint_location">例如：昨日世界酒馆 C区</string>
+    <string name="edit_label_time">时间安排</string>
+    <string name="edit_label_start">开始</string>
+    <string name="edit_label_end">结束</string>
+    <string name="edit_duration">预计时长: %1$s</string>
+    <string name="edit_label_note">备注</string>
+    <string name="edit_hint_note">添加额外的信息...</string>
+    <string name="edit_error_blank_team">请填写团队</string>
+    <string name="edit_error_missing_tokuten_kind">请选择特典种类</string>
+    <string name="edit_error_end_before_start">结束时间必须晚于开始时间</string>
+    <string name="edit_pick_start">选择开始时间</string>
+    <string name="edit_pick_end">选择结束时间</string>
+    <string name="edit_delete_team_title">删除团队</string>
+    <string name="edit_delete_team_message">确定要删除「%1$s」这个团队候选吗？该名称会从相关日程的团队列表中移除。</string>
+    <string name="edit_delete_event_title">删除日程</string>
+    <string name="edit_delete_event_message">确定删除「%1$s」吗？</string>
+
+    <string name="gap_label">空闲 %1$s</string>
+    <string name="gap_ongoing">(%1$s)</string>
+</resources>
