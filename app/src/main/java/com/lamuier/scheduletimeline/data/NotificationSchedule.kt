@@ -56,6 +56,30 @@ object NotificationSchedule {
         .minByOrNull { it.startMillis }
 
     /**
+     * 下一次需要刷新常驻通知的时刻。
+     *
+     * - 有进行中事件时，取「下一个边界」与「now + intervalMs」的较早者，
+     *   让进行中通知的进度条按 [intervalMs] 周期性走动（Doze 下由系统节流，
+     *   但此时屏幕熄灭用户不可见，亮屏退出 Doze 后恢复正常周期）。
+     * - 空档 / upcoming 状态不周期性刷新，避免抢占 Doze 维护窗口，
+     *   保证下一项 startMillis 边界能可靠触发 upcoming → active 切换。
+     */
+    fun nextRefreshAt(
+        events: List<ScheduleEvent>,
+        nowMillis: Long,
+        zone: ZoneId,
+        intervalMs: Long,
+    ): Long? {
+        val boundary = nextBoundaryAfter(events, nowMillis, zone)
+        val hasActive = activeAt(events, nowMillis, zone).isNotEmpty()
+        return if (hasActive) {
+            listOfNotNull(boundary, nowMillis + intervalMs).minOrNull()
+        } else {
+            boundary
+        }
+    }
+
+    /**
      * 单个事件窗口的关键时间点提醒。用 ZonedDateTime 做偏移而非毫秒加减，
      * 保证「3 天前同一时刻」「当天 0 点」按本地墙钟时间对齐。
      */

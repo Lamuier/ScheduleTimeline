@@ -303,7 +303,11 @@ class ScheduleNotificationCoordinator(
             .setWhen(startMillis)
             .setUsesChronometer(true)
             .setChronometerCountDown(upcoming)
-            .setTimeoutAfter(max(1L, endMillis - nowMillis))
+            .setTimeoutAfter(
+                // upcoming：到开始时刻超时（由边界闹钟 refresh 切换为进行中，
+                // 避免倒计时走过 0 后长期挂负数）；active：到结束时刻超时作为保底。
+                max(1L, if (upcoming) startMillis - nowMillis else endMillis - nowMillis),
+            )
 
         val durationMinutes = max(1, ((endMillis - startMillis) / 60_000L).toInt())
         builder.setProgress(
@@ -408,7 +412,9 @@ class ScheduleNotificationCoordinator(
     }
 
     private fun scheduleNextBoundary(events: List<ScheduleEvent>, nowMillis: Long) {
-        val next = NotificationSchedule.nextBoundaryAfter(events, nowMillis, zone)
+        val next = NotificationSchedule.nextRefreshAt(
+            events, nowMillis, zone, PROGRESS_REFRESH_INTERVAL_MS,
+        )
         val pendingIntent = boundaryPendingIntent()
         alarmManager.cancel(pendingIntent)
         if (next != null) {
@@ -482,5 +488,6 @@ class ScheduleNotificationCoordinator(
         private const val REMINDER_NOTIFICATION_ID_BASE = 5_000
         private const val REMINDER_AUTO_DISMISS_MILLIS = 5 * 60_000L
         private const val CHIP_COUNTDOWN_WINDOW_MINUTES = 120L
+        private const val PROGRESS_REFRESH_INTERVAL_MS = 60_000L
     }
 }
