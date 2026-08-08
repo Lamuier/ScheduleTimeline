@@ -8,6 +8,7 @@
     <string name="cd_add_team">添加团队</string>
     <string name="cd_back">返回</string>
     <string name="cd_delete">删除</string>
+    <string name="cd_edit_event">编辑日程</string>
     <string name="cd_more">更多</string>
     <string name="cd_prev_day">前一天</string>
     <string name="cd_next_day">后一天</string>
@@ -45,6 +46,9 @@
     <string name="event_untitled">未命名</string>
     <string name="event_linked_performance">关联演出：%1$s %2$s</string>
     <string name="event_linked_tokuten">关联特典：%1$s %2$s</string>
+    <string name="event_detail_duration">时长：%1$s</string>
+    <string name="event_in_progress">进行中</string>
+    <string name="event_detail_title">日程详情</string>
 
     <string name="manage_data_title">设置</string>
     <string name="manage_data_subtitle">外观、通知、导入导出与本地数据</string>
@@ -58,6 +62,9 @@
     <string name="notification_toggle_summary">日程开始时提醒，并持续显示当前进度；Android 16 支持 Live Updates</string>
     <string name="notification_always_on_title">显示未来日程</string>
     <string name="notification_always_on_summary">开启后，没有进行中的日程时显示下一项未来日程；关闭后只显示当前日程</string>
+    <string name="background_keep_alive_title">后台保活设置</string>
+    <string name="background_keep_alive_summary">通知不更新或开机后失效？打开本机厂商设置页，把追程加入自启动与电池白名单</string>
+    <string name="background_keep_alive_fallback_toast">未识别到厂商设置页，已打开在线教程</string>
     <string name="notification_channel_name">日程实时更新</string>
     <string name="notification_channel_description">日程开始提醒和当前行程进度</string>
     <string name="notification_live_title_single">%1$s 正在进行</string>

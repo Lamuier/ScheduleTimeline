@@ -1,5 +1,6 @@
 package com.lamuier.scheduletimeline.ui.timeline
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -14,21 +16,30 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -37,6 +48,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
@@ -55,49 +68,119 @@ import com.lamuier.scheduletimeline.ui.theme.eventTypeColors
 @Composable
 internal fun TimelineList(
     items: List<TimelineItem>,
-    onEditEvent: (Long) -> Unit,
     events: List<ScheduleEvent> = emptyList(),
+    nowMinutes: Int? = null,
+    onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 80.dp),
-    ) {
-        itemsIndexed(items, key = { index, item ->
-            when (item) {
-                is TimelineItem.Event -> "e-${item.event.id}"
-                is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
-                is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
-            }
-        }) { index, item ->
-            TimelineNode(
-                isFirst = index == 0,
-                isLast = index == items.lastIndex,
-                item = item,
-            ) {
+    // 用 LazyListState 直接取可见 item 在视口内的 offset/size，避免 onPlaced 坐标空间错位。
+    val listState = rememberLazyListState()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 80.dp),
+        ) {
+            itemsIndexed(items, key = { index, item ->
                 when (item) {
-                    is TimelineItem.Event -> EventCard(
-                        item = item,
-                        linkedPerformances = events.filter {
-                            EventType.fromStorage(item.event.eventType) == EventType.TOKUTEN &&
-                                EventType.fromStorage(it.eventType) == EventType.PERFORMANCE &&
-                                item.event.sharesTeamWith(it)
-                        }.sortedBy { it.startMinutes },
-                        linkedTokuten = events.filter {
-                            EventType.fromStorage(item.event.eventType) == EventType.PERFORMANCE &&
-                                EventType.fromStorage(it.eventType) == EventType.TOKUTEN &&
-                                item.event.sharesTeamWith(it)
-                        }.sortedBy { it.startMinutes },
-                        onClick = { onEditEvent(item.event.id) },
-                    )
-                    is TimelineItem.OverlapGroup -> ParallelEventCards(
-                        group = item,
-                        events = events,
-                        onEditEvent = onEditEvent,
-                    )
-                    is TimelineItem.Gap -> GapCard(item = item)
+                    is TimelineItem.Event -> "e-${item.event.id}"
+                    is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
+                    is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
+                }
+            }) { index, item ->
+                TimelineNode(
+                    isFirst = index == 0,
+                    isLast = index == items.lastIndex,
+                    item = item,
+                ) {
+                    when (item) {
+                        is TimelineItem.Event -> EventCard(
+                            item = item,
+                            nowMinutes = nowMinutes,
+                            onClick = { onSelectEvent(item) },
+                        )
+                        is TimelineItem.OverlapGroup -> ParallelEventCards(
+                            group = item,
+                            events = events,
+                            nowMinutes = nowMinutes,
+                            onSelectEvent = onSelectEvent,
+                        )
+                        is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
+                    }
                 }
             }
         }
+
+        // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示，
+        // 位置直接由 LazyListState 的可见 item 信息插值得到，随滚动与当前时间实时更新。
+        if (nowMinutes != null) {
+            val bottomPadPx = with(LocalDensity.current) { 16.dp.roundToPx() }
+            val nowY = computeNowY(listState, items, nowMinutes, bottomPadPx)
+            if (nowY != null) {
+                NowLine(y = nowY)
+            }
+        }
+    }
+}
+
+/**
+ * 根据 LazyListState 中可见 item 的实际视口位置，计算「现在」(now, 分钟) 在列表中的 y 像素。
+ * 落在可见 item 时间范围内时，按其在「卡片区」(去掉内容区底部 [bottomPadPx] 留白) 内的时间占比插值；
+ * 这样 now 线的起点/终点与左侧时间标签（卡片顶/底）严格对齐。当前时刻不可见时返回 null。
+ */
+private fun computeNowY(
+    listState: LazyListState,
+    items: List<TimelineItem>,
+    now: Int,
+    bottomPadPx: Int,
+): Float? {
+    val layoutInfo = listState.layoutInfo
+    for (info in layoutInfo.visibleItemsInfo) {
+        val item = items.getOrNull(info.index) ?: continue
+        val (start, end) = when (item) {
+            is TimelineItem.Event -> item.event.startMinutes to item.event.endMinutes
+            is TimelineItem.OverlapGroup -> item.startMinutes to item.endMinutes
+            is TimelineItem.Gap -> item.startMinutes to item.endMinutes
+        }
+        if (now in start until end) {
+            val span = (end - start).coerceAtLeast(1)
+            val frac = (now - start).toFloat() / span
+            val contentHeight = (info.size - bottomPadPx).coerceAtLeast(1)
+            return info.offset + frac * contentHeight
+        }
+    }
+    return null
+}
+
+/**
+ * 整轴「现在」红线：仅在左侧时间轴留白区（列表左 padding 12.dp ~ 卡片左缘 90.dp）画一条
+ * 短横线 + 圆点，对齐竖向节点列中心；不进入卡片内容区，避免横穿卡片。
+ * 位置由 LazyListState 可见 item 信息插值得出，随 now / 滚动实时移动。
+ */
+@Composable
+private fun NowLine(y: Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset { IntOffset(0, y.toInt()) },
+    ) {
+        // 横线：仅左侧留白（时间标签右缘 58.dp ~ 卡片左缘 90.dp），不压卡片。
+        Box(
+            modifier = Modifier
+                .padding(start = 58.dp)
+                .width(32.dp)
+                .height(2.dp)
+                .background(ProgressRed),
+        )
+        // 圆点：对齐左侧竖向节点列中心（contentPadding.start 12.dp + 节点 62.dp = 74.dp）。
+        // 圆点宽 10.dp，故左移 5.dp 让圆心正好落在节点中心线上，而非偏到右侧。
+        Box(
+            modifier = Modifier
+                .offset { IntOffset((74.dp - 5.dp).roundToPx(), (-4).dp.roundToPx()) }
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(ProgressRed),
+        )
     }
 }
 
@@ -153,15 +236,28 @@ private fun TimelineNode(
         Box(
             modifier = Modifier
                 .width(46.dp)
-                .padding(top = 12.dp),
+                .fillMaxHeight(),
             contentAlignment = Alignment.TopEnd,
         ) {
-            Text(
-                text = TimeFormat.minutesToHm(item.startMinutes),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = TimeFormat.minutesToHm(item.startMinutes),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = TimeFormat.minutesToHm(item.endMinutes),
+                    color = MaterialTheme.colorScheme.outline,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Normal,
+                )
+            }
         }
         Spacer(modifier = Modifier.width(32.dp))
         Box(
@@ -174,148 +270,110 @@ private fun TimelineNode(
     }
 }
 
+/**
+ * 卡片只展示主要概览（时间、团队/标题、类型）；地点、关联演出/特典、重叠警告、备注
+ * 统一收进 [EventDetailSheet]。进行中的事件在卡片顶部画一条进度线，标明当前进行到哪。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EventCard(
     item: TimelineItem.Event,
-    linkedPerformances: List<ScheduleEvent>,
-    linkedTokuten: List<ScheduleEvent>,
+    nowMinutes: Int?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    fillHeight: Boolean = false,
 ) {
     val event = item.event
     val dark = LocalDarkTheme.current
     val colors = remember(event.eventType, event.tokutenKind, dark) {
         eventTypeColors(event).adaptTo(dark)
     }
-    // 卡片底用类型主色低透明度染色：让卡片在并列时间轨道的空白区里明显跳出来，
-    // 同时比 chip / 红框更弱，避免夺走层级焦点。
     val cardContainer = colors.accent.copy(alpha = if (dark) 0.18f else 0.12f)
 
-    Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = cardContainer),
-    ) {
-        Column(
-            modifier = Modifier.padding(if (compact) 10.dp else 16.dp),
-            verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+    val inProgress = nowMinutes != null && nowMinutes in event.startMinutes until event.endMinutes
+    val progressFraction = if (inProgress && event.endMinutes > event.startMinutes) {
+        ((nowMinutes!! - event.startMinutes).toFloat() / (event.endMinutes - event.startMinutes))
+            .coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        Card(
+            onClick = onClick,
+            modifier = if (fillHeight) Modifier.fillMaxWidth().fillMaxHeight() else Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = cardContainer),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = TimeFormat.rangeLabel(event.startMinutes, event.endMinutes),
-                    color = colors.accent,
-                    style = if (compact) {
-                        MaterialTheme.typography.labelMedium
-                    } else {
-                        MaterialTheme.typography.labelLarge
-                    },
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-                Surface(
-                    color = colors.container,
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Text(
-                        text = EventLabels.typeChip(event),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.accent,
-                    )
-                }
-            }
-
-            Text(
-                text = event.teamDisplay.ifBlank { event.title }.ifBlank {
-                    stringResource(R.string.event_untitled)
-                },
-                style = if (compact) {
-                    MaterialTheme.typography.titleSmall
-                } else {
-                    MaterialTheme.typography.titleMedium
-                },
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold,
-            )
-
-            if (event.title.isNotBlank() && event.teamDisplay.isNotBlank()) {
-                Text(
-                    text = event.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            linkedPerformances.forEach { linkedPerformance ->
-                Text(
-                    text = stringResource(
-                        R.string.event_linked_performance,
-                        linkedPerformance.teamDisplay.ifBlank { linkedPerformance.title },
-                        TimeFormat.rangeLabel(
-                            linkedPerformance.startMinutes,
-                            linkedPerformance.endMinutes,
-                        ),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-
-            if (!compact) linkedTokuten.forEach { tokuten ->
-                Text(
-                    text = stringResource(
-                        R.string.event_linked_tokuten,
-                        EventLabels.typeChip(tokuten),
-                        TimeFormat.rangeLabel(tokuten.startMinutes, tokuten.endMinutes),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-
-            if (event.location.isNotBlank()) {
+            Column(
+                modifier = Modifier.padding(if (compact) 10.dp else 16.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = event.location,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = TimeFormat.rangeLabel(event.startMinutes, event.endMinutes),
+                        color = colors.accent,
+                        style = if (compact) {
+                            MaterialTheme.typography.labelMedium
+                        } else {
+                            MaterialTheme.typography.labelLarge
+                        },
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
                     )
-                }
-            }
-
-            item.overlapNotes.forEach { note ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Surface(
+                        color = colors.container,
+                        shape = RoundedCornerShape(8.dp),
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = note,
+                            text = EventLabels.typeChip(event),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            color = colors.accent,
                         )
                     }
                 }
+
+                Text(
+                    text = event.teamDisplay.ifBlank { event.title }.ifBlank {
+                        stringResource(R.string.event_untitled)
+                    },
+                    style = if (compact) {
+                        MaterialTheme.typography.titleSmall
+                    } else {
+                        MaterialTheme.typography.titleMedium
+                    },
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                )
+
+                if (event.title.isNotBlank() && event.teamDisplay.isNotBlank()) {
+                    Text(
+                        text = event.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        // 进行中：卡片左侧竖线进度，红线由上往下实时填充，标明当前进行到哪。
+        if (inProgress) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(progressFraction)
+                        .background(ProgressRed),
+                )
             }
         }
     }
@@ -330,14 +388,21 @@ private const val PARALLEL_PX_PER_MINUTE = 4
 /** 轨道高度上限：超过后自动缩小比例尺，保证整组仍能在一屏内放下。 */
 private val PARALLEL_MAX_LANE_HEIGHT = 600.dp
 
-/** 卡片最小可读高度：保证时间、团队、类型与重叠提示至少可见。 */
+/** 卡片最小可读高度：保证时间、团队、类型至少可见。 */
 private val PARALLEL_MIN_CARD_HEIGHT = 96.dp
+
+/** 并行轨道内相邻卡片之间的视觉间隙，避免时间连续的卡片贴在一起像一块。 */
+private val PARALLEL_CARD_GAP = 4.dp
+
+/** 进行中竖线进度颜色（红线）。 */
+private val ProgressRed = Color(0xFFE53935)
 
 @Composable
 private fun ParallelEventCards(
     group: TimelineItem.OverlapGroup,
     events: List<ScheduleEvent>,
-    onEditEvent: (Long) -> Unit,
+    nowMinutes: Int?,
+    onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -349,8 +414,8 @@ private fun ParallelEventCards(
             items = group.performanceEvents,
             groupStart = group.startMinutes,
             groupEnd = group.endMinutes,
-            events = events,
-            onEditEvent = onEditEvent,
+            nowMinutes = nowMinutes,
+            onSelectEvent = onSelectEvent,
             modifier = Modifier.weight(1f),
         )
         EventLane(
@@ -358,8 +423,8 @@ private fun ParallelEventCards(
             items = group.tokutenEvents,
             groupStart = group.startMinutes,
             groupEnd = group.endMinutes,
-            events = events,
-            onEditEvent = onEditEvent,
+            nowMinutes = nowMinutes,
+            onSelectEvent = onSelectEvent,
             modifier = Modifier.weight(1f),
         )
     }
@@ -371,8 +436,8 @@ private fun EventLane(
     items: List<TimelineItem.Event>,
     groupStart: Int,
     groupEnd: Int,
-    events: List<ScheduleEvent>,
-    onEditEvent: (Long) -> Unit,
+    nowMinutes: Int?,
+    onSelectEvent: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val laneMinutes = (groupEnd - groupStart).coerceAtLeast(1)
@@ -406,25 +471,16 @@ private fun EventLane(
                 val cardOffset = ((event.startMinutes - groupStart) * scale).dp
                 val timeHeight = ((event.endMinutes - event.startMinutes).coerceAtLeast(1) * scale).dp
                 val cardHeight = timeHeight.coerceAtLeast(PARALLEL_MIN_CARD_HEIGHT)
-                val linkedPerformances = events.filter {
-                    EventType.fromStorage(event.eventType) == EventType.TOKUTEN &&
-                        EventType.fromStorage(it.eventType) == EventType.PERFORMANCE &&
-                        event.sharesTeamWith(it)
-                }.sortedBy { it.startMinutes }
-                val linkedTokuten = events.filter {
-                    EventType.fromStorage(event.eventType) == EventType.PERFORMANCE &&
-                        EventType.fromStorage(it.eventType) == EventType.TOKUTEN &&
-                        event.sharesTeamWith(it)
-                }.sortedBy { it.startMinutes }
                 EventCard(
                     item = item,
-                    linkedPerformances = linkedPerformances,
-                    linkedTokuten = linkedTokuten,
-                    onClick = { onEditEvent(event.id) },
+                    nowMinutes = nowMinutes,
+                    onClick = { onSelectEvent(item) },
                     compact = true,
+                    fillHeight = true,
                     modifier = Modifier
                         .offset(y = cardOffset)
-                        .height(cardHeight),
+                        .height(cardHeight)
+                        .padding(bottom = PARALLEL_CARD_GAP),
                 )
             }
         }
@@ -432,7 +488,16 @@ private fun EventLane(
 }
 
 @Composable
-private fun GapCard(item: TimelineItem.Gap) {
+private fun GapCard(item: TimelineItem.Gap, nowMinutes: Int? = null) {
+    val inProgress = nowMinutes != null && nowMinutes in item.startMinutes until item.endMinutes
+    val progressFraction = if (inProgress && item.endMinutes > item.startMinutes) {
+        ((nowMinutes!! - item.startMinutes).toFloat() / (item.endMinutes - item.startMinutes))
+            .coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val progressColor = MaterialTheme.colorScheme.secondary
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = Color.Transparent,
@@ -460,6 +525,208 @@ private fun GapCard(item: TimelineItem.Gap) {
                     fontStyle = FontStyle.Italic,
                 )
             }
+
+            // 空闲进行中：底部细进度条，宽度 = 已过时长占比，标明当前进行到哪。
+            // 与进行中事件卡顶部的进度线呼应：事件是「还剩多少」，空闲是「熬过多少」。
+            if (inProgress) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progressFraction)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(progressColor),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 事件详情：点击概览卡片后从底部弹出。展示完整信息（时间、时长、地点、关联演出/特典、
+ * 重叠警告与备注），左下角放编辑悬浮按钮，点击进入编辑页。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun EventDetailSheet(
+    item: TimelineItem.Event,
+    events: List<ScheduleEvent>,
+    onEdit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val event = item.event
+    val dark = LocalDarkTheme.current
+    val colors = remember(event.eventType, event.tokutenKind, dark) {
+        eventTypeColors(event).adaptTo(dark)
+    }
+
+    val linkedPerformances = remember(event, events) {
+        events.filter {
+            EventType.fromStorage(event.eventType) == EventType.TOKUTEN &&
+                EventType.fromStorage(it.eventType) == EventType.PERFORMANCE &&
+                event.sharesTeamWith(it)
+        }.sortedBy { it.startMinutes }
+    }
+    val linkedTokuten = remember(event, events) {
+        events.filter {
+            EventType.fromStorage(event.eventType) == EventType.PERFORMANCE &&
+                EventType.fromStorage(it.eventType) == EventType.TOKUTEN &&
+                event.sharesTeamWith(it)
+        }.sortedBy { it.startMinutes }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = event.teamDisplay.ifBlank { event.title }.ifBlank {
+                            stringResource(R.string.event_untitled)
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Surface(
+                        color = colors.container,
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text(
+                            text = EventLabels.typeChip(event),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.accent,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                if (event.title.isNotBlank() && event.teamDisplay.isNotBlank()) {
+                    Text(
+                        text = event.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                Text(
+                    text = TimeFormat.rangeLabel(event.startMinutes, event.endMinutes),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.accent,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = stringResource(
+                        R.string.event_detail_duration,
+                        TimeFormat.durationLabel(event.startMinutes, event.endMinutes),
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                if (event.location.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = event.location,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+
+                linkedPerformances.forEach { linked ->
+                    Text(
+                        text = stringResource(
+                            R.string.event_linked_performance,
+                            linked.teamDisplay.ifBlank { linked.title },
+                            TimeFormat.rangeLabel(linked.startMinutes, linked.endMinutes),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                linkedTokuten.forEach { linked ->
+                    Text(
+                        text = stringResource(
+                            R.string.event_linked_tokuten,
+                            EventLabels.typeChip(linked),
+                            TimeFormat.rangeLabel(linked.startMinutes, linked.endMinutes),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+
+                item.overlapNotes.forEach { note ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 左下角编辑悬浮按钮：从概览卡进入详情后，再进入编辑页。
+            SmallFloatingActionButton(
+                onClick = onEdit,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(20.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = stringResource(R.string.cd_edit_event),
+                )
+            }
         }
     }
 }
@@ -483,18 +750,33 @@ private fun EventCardPreview() {
                 ),
                 overlapNotes = listOf("与StarCandy演出重叠"),
             ),
-            linkedPerformances = listOf(
-                ScheduleEvent(
+            nowMinutes = 18 * 60,
+            onClick = {},
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun EventDetailSheetPreview() {
+    ScheduleTimelineTheme {
+        EventDetailSheet(
+            item = TimelineItem.Event(
+                event = ScheduleEvent(
                     id = 1,
                     team = "StarDiary",
                     eventType = EventType.PERFORMANCE.storage,
-                    startMinutes = 14 * 60 + 20,
-                    endMinutes = 14 * 60 + 40,
+                    title = "午场",
+                    location = "昨日世界酒馆 C区",
+                    startMinutes = 14 * 60,
+                    endMinutes = 16 * 60,
                     dayKey = "2026-07-12",
                 ),
+                overlapNotes = listOf("与StarCandy特典重叠"),
             ),
-            linkedTokuten = emptyList(),
-            onClick = {},
+            events = emptyList(),
+            onEdit = {},
+            onDismiss = {},
         )
     }
 }

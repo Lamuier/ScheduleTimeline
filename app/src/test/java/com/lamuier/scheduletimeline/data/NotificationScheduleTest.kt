@@ -41,6 +41,34 @@ class NotificationScheduleTest {
     }
 
     @Test
+    fun nextRefreshAt_returnsPeriodicIntervalWhileActive() {
+        val events = listOf(event(1, 10 * 60, 11 * 60))
+        val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        // 10:20，事件 10:00-11:00 进行中
+        val now = dayStart + (10 * 60 + 20) * 60_000L
+
+        // 进行中：取 min(下一边界 11:00, now + 60s) = now + 60s，让进度条周期走动
+        assertEquals(
+            now + 60_000L,
+            NotificationSchedule.nextRefreshAt(events, now, zone, 60_000L),
+        )
+    }
+
+    @Test
+    fun nextRefreshAt_returnsBoundaryWhenNoActiveEvent() {
+        val events = listOf(event(1, 10 * 60, 11 * 60))
+        val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
+        // 09:00，空档，下一项 10:00 未开始
+        val now = dayStart + 9 * 60 * 60_000L
+
+        // 空档：不周期刷新，返回下一边界（10:00 开始），保证 upcoming → active 切换可靠
+        assertEquals(
+            dayStart + 10 * 60 * 60_000L,
+            NotificationSchedule.nextRefreshAt(events, now, zone, 60_000L),
+        )
+    }
+
+    @Test
     fun remindersFor_alignsToLocalWallClock() {
         val window = NotificationSchedule.windows(listOf(event(1, 10 * 60, 11 * 60)), zone).single()
         val reminders = NotificationSchedule.remindersFor(window, zone)

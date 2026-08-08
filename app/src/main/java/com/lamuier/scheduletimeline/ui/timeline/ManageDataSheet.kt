@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -214,6 +215,7 @@ private fun MainMenu(
     onExport: () -> Unit,
     onClear: () -> Unit,
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -259,6 +261,26 @@ private fun MainMenu(
             checked = liveUpdatesAlwaysOn,
             onCheckedChange = onLiveUpdatesAlwaysOnChange,
         )
+        Spacer(Modifier.height(8.dp))
+
+        // 后台保活入口：厂商杀后台是「通知不更新 / 开机后通知失效」的最常见根因，
+        // 引导用户进本机厂商设置页加白名单。Intent 数据综合自 backgroundable-android
+        // 与 dontkillmyapp.com。
+        ActionGroup {
+            ActionRow(
+                icon = Icons.Default.Settings,
+                iconTint = MaterialTheme.colorScheme.tertiary,
+                iconContainer = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f),
+                title = stringResource(R.string.background_keep_alive_title),
+                summary = stringResource(R.string.background_keep_alive_summary),
+                onClick = {
+                    BackgroundRestrictionHelper.open(
+                        context = context,
+                        fallbackToastResId = R.string.background_keep_alive_fallback_toast,
+                    )
+                },
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
 
