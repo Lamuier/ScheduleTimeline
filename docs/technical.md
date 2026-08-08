@@ -56,8 +56,8 @@ versionCode = N      // 整数，上架递增
 versionName = "X.Y.Z"
 ```
 
-- Debug：自动加 `-debug` 后缀（如 `1.6.1-debug`）。
-- Release：无后缀（如 `1.6.1`）。
+- Debug：自动加 `-debug` 后缀（如 `1.7.0-debug`）。
+- Release：无后缀（如 `1.7.0`）。
 
 版本级别判定：不向后兼容的接口/数据/权限变更升主版本（X）；向后兼容地新增用户可见能力升次版本（Y）；仅修复与维护升修订版（Z）。发版须先写明「版本判定：当前 → 目标（依据）」。
 
@@ -88,6 +88,7 @@ Kotlin · Jetpack Compose · Material 3 · MVVM（ViewModel + StateFlow + Reposi
 - 最低 API 26 · 编译 API 36.1 · 目标 API 36
 - ABI 仅 `arm64-v8a`
 - 包名 `com.lamuier.scheduletimeline`
+- 固定 `buildToolsVersion = "36.1.0"`（与 compileSdk 36.1 对齐；本机缺 AGP 默认 35.0.0 故显式固定，保证 Release 可复现）
 
 ## 项目结构
 

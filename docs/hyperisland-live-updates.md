@@ -125,7 +125,8 @@ payload 结构与字段值均无出入，可排除 JSON 解析失败的假设。
 1. 应用启动或回到前台时读取全部本地日程并刷新。
 2. 保存、删除、批量导入、清空数据后立即刷新。
 3. 到达最近的开始/结束边界时由 `AlarmManager` 唤醒并刷新。
-4. 关闭总通知时同时关闭「显示未来日程」，并取消边界闹钟与提醒闹钟。
+4. 进行中事件按事件时长动态间隔（约 1%/步，5–60 秒）由精确闹钟（`setExactAndAllowWhileIdle`，需 `SCHEDULE_EXACT_ALARM`）周期刷新进度；空档与未来待办不周期刷新，避免抢占 Doze 维护窗口影响边界切换。
+5. 关闭总通知时同时关闭「显示未来日程」，并取消边界闹钟与提醒闹钟。
 
 ---
 
@@ -200,8 +201,9 @@ extras["miui.focus.param"]   = JSON 字符串（{"param_v2": {...}, "isShowNotif
 | POST_NOTIFICATIONS | ✅ | ✅ | ✅ |
 | POST_PROMOTED_NOTIFICATIONS | ❌ | ✅ | ✅ |
 | 其他 MIUI 私有权限 | 无 | 无 | 无 |
+| SCHEDULE_EXACT_ALARM | ❌ | ❌ | ✅（1.7.0 起，进行中进度条精确刷新） |
 
-Manifest 无差异，小米焦点通知不要求额外声明权限。
+Manifest 差异：本工程额外声明 `SCHEDULE_EXACT_ALARM` 以支持精确闹钟刷新进度条；小米焦点通知本身不要求额外声明权限。
 
 ### 7.3 假设的验证顺序（建议保留）
 

@@ -53,6 +53,9 @@
 
 ## 未归档
 
+### 文档
+- 同步文档至 1.7.0 实际功能：README 补充「当前时间线」「概览 + 详情」；UI-design 更新卡片概览模式与时间轴「当前时间线」语义、并行卡片 4.dp 间隙；hyperisland 文档补充精确闹钟进度刷新（`SCHEDULE_EXACT_ALARM`）与状态刷新时机；technical 版本示例与 buildToolsVersion 说明对齐当前
+
 ## 1.6.1 - 2026-08-07
 
 ### 修复
