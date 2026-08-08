@@ -94,7 +94,7 @@ internal fun TimelineList(
                         nowMinutes = nowMinutes,
                         onSelectEvent = onSelectEvent,
                     )
-                    is TimelineItem.Gap -> GapCard(item = item)
+                    is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
                 }
             }
         }
@@ -376,7 +376,16 @@ private fun EventLane(
 }
 
 @Composable
-private fun GapCard(item: TimelineItem.Gap) {
+private fun GapCard(item: TimelineItem.Gap, nowMinutes: Int? = null) {
+    val inProgress = nowMinutes != null && nowMinutes in item.startMinutes until item.endMinutes
+    val progressFraction = if (inProgress && item.endMinutes > item.startMinutes) {
+        ((nowMinutes!! - item.startMinutes).toFloat() / (item.endMinutes - item.startMinutes))
+            .coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val progressColor = MaterialTheme.colorScheme.secondary
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = Color.Transparent,
@@ -403,6 +412,31 @@ private fun GapCard(item: TimelineItem.Gap) {
                     style = MaterialTheme.typography.bodySmall,
                     fontStyle = FontStyle.Italic,
                 )
+            }
+
+            // 空闲进行中：底部细进度条，宽度 = 已过时长占比，标明当前进行到哪。
+            // 与进行中事件卡顶部的进度线呼应：事件是「还剩多少」，空闲是「熬过多少」。
+            if (inProgress) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progressFraction)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(progressColor),
+                    )
+                }
             }
         }
     }
