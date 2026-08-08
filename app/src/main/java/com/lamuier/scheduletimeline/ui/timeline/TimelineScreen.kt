@@ -45,6 +45,7 @@ fun TimelineScreen(
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
+    var selectedEvent by remember { mutableStateOf<TimelineItem.Event?>(null) }
     val isToday = currentDate == LocalDate.now()
     var nearestHint by remember { mutableStateOf<NearestScheduleHint?>(null) }
     LaunchedEffect(dayState.date, dayState.events.isEmpty()) {
@@ -134,7 +135,7 @@ fun TimelineScreen(
                             viewModel.changeDate(it)
                         }
                     },
-                    onEditEvent = onEditEvent,
+                    onSelectEvent = { selectedEvent = it },
                 )
             }
 
@@ -199,6 +200,19 @@ fun TimelineScreen(
             onDismiss = { showManageSheet = false },
         )
     }
+
+    selectedEvent?.let { event ->
+        EventDetailSheet(
+            item = event,
+            events = dayState.events,
+            onEdit = {
+                val id = event.event.id
+                selectedEvent = null
+                onEditEvent(id)
+            },
+            onDismiss = { selectedEvent = null },
+        )
+    }
 }
 
 private const val DAY_PAGE_COUNT = 20_000
@@ -210,13 +224,30 @@ private fun DayPage(
     events: List<ScheduleEvent>,
     nearestHint: NearestScheduleHint?,
     onJumpToNearest: (NearestScheduleHint) -> Unit,
-    onEditEvent: (Long) -> Unit,
+    onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
     val pageItems = remember(events) { TimelineBuilder.build(events) }
     val pageStats = remember(events) { ChartLayout.stats(events) }
+
+    // 「当前时间」驱动器：仅今天页启动，每 30 秒刷新一次，用于顶部状态条文案
+    // 与进行中卡片顶部进度线。非今天页传 null，不画进度线。
+    val isToday = date == LocalDate.now()
+    var nowMinutes by remember {
+        mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute })
+    }
+    if (isToday) {
+        LaunchedEffect(Unit) {
+            while (true) {
+                nowMinutes = LocalTime.now().let { it.hour * 60 + it.minute }
+                delay(30_000)
+            }
+        }
+    }
+    val effectiveNow = if (isToday) nowMinutes else null
+
     Column(modifier = Modifier.fillMaxSize()) {
-        if (date == LocalDate.now()) {
-            CurrentStatusBanner(pageItems)
+        if (isToday) {
+            CurrentStatusBanner(pageItems, nowMinutes)
         }
 
         if (pageStats != null) {
@@ -230,24 +261,16 @@ private fun DayPage(
         } else {
             TimelineList(
                 items = pageItems,
-                onEditEvent = onEditEvent,
                 events = events,
+                nowMinutes = effectiveNow,
+                onSelectEvent = onSelectEvent,
             )
         }
     }
 }
 
 @Composable
-private fun CurrentStatusBanner(items: List<TimelineItem>) {
-    var nowMinutes by remember { mutableIntStateOf(LocalTime.now().let { it.hour * 60 + it.minute }) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            nowMinutes = LocalTime.now().let { it.hour * 60 + it.minute }
-            delay(30_000)
-        }
-    }
-
+private fun CurrentStatusBanner(items: List<TimelineItem>, nowMinutes: Int) {
     val eventItems = items.flatMap { item ->
         when (item) {
             is TimelineItem.Event -> listOf(item)

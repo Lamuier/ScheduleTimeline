@@ -8,6 +8,7 @@
     <string name="cd_add_team">添加团队</string>
     <string name="cd_back">返回</string>
     <string name="cd_delete">删除</string>
+    <string name="cd_edit_event">编辑日程</string>
     <string name="cd_more">更多</string>
     <string name="cd_prev_day">前一天</string>
     <string name="cd_next_day">后一天</string>
@@ -45,6 +46,9 @@
     <string name="event_untitled">未命名</string>
     <string name="event_linked_performance">关联演出：%1$s %2$s</string>
     <string name="event_linked_tokuten">关联特典：%1$s %2$s</string>
+    <string name="event_detail_duration">时长：%1$s</string>
+    <string name="event_in_progress">进行中</string>
+    <string name="event_detail_title">日程详情</string>
 
     <string name="manage_data_title">设置</string>
     <string name="manage_data_subtitle">外观、通知、导入导出与本地数据</string>
