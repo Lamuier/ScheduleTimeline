@@ -20,11 +20,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -219,11 +221,12 @@ private fun EditEventContent(
                     }
                 },
                 actions = {
+                    // 保存移到右上角（原来在底部），删除移到列表底部——删除更不易误触。
                     if (!state.isNew) {
-                        IconButton(onClick = onRequestDelete) {
+                        IconButton(onClick = onSave) {
                             Icon(
-                                Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
+                                Icons.Default.Check,
+                                contentDescription = stringResource(R.string.action_save_event),
                             )
                         }
                     }
@@ -471,17 +474,44 @@ private fun EditEventContent(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = onSave,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Text(
-                    stringResource(R.string.action_save_event),
-                    style = MaterialTheme.typography.titleMedium,
-                )
+            if (!state.isNew) {
+                // 已有事件：底部放删除（ destructive 风格），与右上角保存互换。
+                Button(
+                    onClick = onRequestDelete,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        stringResource(R.string.action_delete),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            } else {
+                // 新建事件：无删除，底部仍是保存。
+                Button(
+                    onClick = onSave,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.action_save_event),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
             }
         }
     }

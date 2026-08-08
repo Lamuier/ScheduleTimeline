@@ -49,7 +49,7 @@ param(
     [switch]$GenerateNewKey,
     [switch]$ForceRebind,
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$RemainingArgs
+        [string[]]$RemainingArgs
 )
 
 $ErrorActionPreference = "Stop"
@@ -585,6 +585,7 @@ function Test-ReleaseApk {
             "android.permission.USE_FINGERPRINT",
             "android.permission.POST_NOTIFICATIONS",
             "android.permission.POST_PROMOTED_NOTIFICATIONS",
+            "android.permission.SCHEDULE_EXACT_ALARM",
             "android.permission.RECEIVE_BOOT_COMPLETED"
         ) -and -not $_.EndsWith(".DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
     }

@@ -87,7 +87,7 @@ class ScheduleNotificationCoordinator(
                 next = NotificationSchedule.nextWindowAfter(events, now, zone),
             )
         }
-        scheduleNextBoundary(events, now)
+        scheduleNextBoundary(events, now, progressRefreshIntervalMs(events, now, zone))
         scheduleNextReminder(events, now)
     }
 
@@ -309,12 +309,9 @@ class ScheduleNotificationCoordinator(
                 max(1L, if (upcoming) startMillis - nowMillis else endMillis - nowMillis),
             )
 
-        val durationMinutes = max(1, ((endMillis - startMillis) / 60_000L).toInt())
-        builder.setProgress(
-            durationMinutes,
-            ((nowMillis - startMillis) / 60_000L).toInt().coerceIn(0, durationMinutes),
-            false,
-        )
+        val durationMs = max(1, (endMillis - startMillis).toInt())
+        val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
+        builder.setProgress(durationMs, progressMs, false)
         applyAndroid16LiveUpdate(
             builder = builder,
             startMillis = startMillis,
@@ -382,11 +379,11 @@ class ScheduleNotificationCoordinator(
     ) {
         if (Build.VERSION.SDK_INT < 36) return
 
-        val duration = max(1, ((endMillis - startMillis) / 60_000L).toInt())
-        val progress = ((nowMillis - startMillis) / 60_000L).toInt().coerceIn(0, duration)
+        val durationMs = max(1, (endMillis - startMillis).toInt())
+        val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
         val progressStyle = Notification.ProgressStyle()
-            .setProgress(progress)
-            .addProgressSegment(Notification.ProgressStyle.Segment(duration))
+            .setProgress(progressMs)
+            .addProgressSegment(Notification.ProgressStyle.Segment(durationMs))
 
         builder.setStyle(progressStyle)
 
@@ -411,19 +408,52 @@ class ScheduleNotificationCoordinator(
         }
     }
 
-    private fun scheduleNextBoundary(events: List<ScheduleEvent>, nowMillis: Long) {
+    private fun scheduleNextBoundary(
+        events: List<ScheduleEvent>,
+        nowMillis: Long,
+        intervalMs: Long,
+    ) {
         val next = NotificationSchedule.nextRefreshAt(
-            events, nowMillis, zone, PROGRESS_REFRESH_INTERVAL_MS,
+            events, nowMillis, zone, intervalMs,
         )
         val pendingIntent = boundaryPendingIntent()
         alarmManager.cancel(pendingIntent)
         if (next != null) {
-            alarmManager.setAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                next,
-                pendingIntent,
-            )
+            // 用精确闹钟：setAndAllowWhileIdle 的一次性闹钟在设备低活跃分桶下会被系统
+            // 批处理/节流到数分钟一次，导致进度条每次可见更新跨度过大（看起来像一下跳 20%）。
+            // setExactAndAllowWhileIdle 不被分桶延迟，进度条得以按设定间隔平滑推进。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                !alarmManager.canScheduleExactAlarms()
+            ) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pendingIntent)
+            } else {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pendingIntent)
+            }
         }
+    }
+
+    /**
+     * 进度条刷新间隔：目标是让每次刷新都让进度推进约 1%（= 按事件时长均分约 100 段），
+     * 同时限制在 [PROGRESS_REFRESH_MIN_MS, PROGRESS_REFRESH_MAX_MS] 之间，兼顾平滑与续航。
+     * 进行中用组合窗口（多个同时进行的事件取并集），空档期用下一项窗口。
+     */
+    private fun progressRefreshIntervalMs(
+        events: List<ScheduleEvent>,
+        nowMillis: Long,
+        zone: ZoneId,
+    ): Long {
+        val active = NotificationSchedule.activeAt(events, nowMillis, zone)
+        val (start, end) = if (active.isNotEmpty()) {
+            active.minOf { it.startMillis } to active.maxOf { it.endMillis }
+        } else {
+            val up = NotificationSchedule.nextWindowAfter(events, nowMillis, zone)
+            (up?.startMillis ?: nowMillis) to (up?.endMillis ?: (nowMillis + PROGRESS_REFRESH_MAX_MS))
+        }
+        val durationMs = max(1L, end - start)
+        return (durationMs / PROGRESS_REFRESH_STEPS).coerceIn(
+            PROGRESS_REFRESH_MIN_MS,
+            PROGRESS_REFRESH_MAX_MS,
+        )
     }
 
     private fun cancelBoundaryAlarm() {
@@ -488,6 +518,8 @@ class ScheduleNotificationCoordinator(
         private const val REMINDER_NOTIFICATION_ID_BASE = 5_000
         private const val REMINDER_AUTO_DISMISS_MILLIS = 5 * 60_000L
         private const val CHIP_COUNTDOWN_WINDOW_MINUTES = 120L
-        private const val PROGRESS_REFRESH_INTERVAL_MS = 60_000L
+        private const val PROGRESS_REFRESH_MIN_MS = 5_000L
+        private const val PROGRESS_REFRESH_MAX_MS = 60_000L
+        private const val PROGRESS_REFRESH_STEPS = 100L // 把事件时长均分约 100 段 ≈ 每次刷新推进 1%
     }
 }

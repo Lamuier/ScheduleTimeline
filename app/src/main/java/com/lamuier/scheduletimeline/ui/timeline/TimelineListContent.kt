@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -15,7 +16,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
@@ -44,6 +48,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
@@ -66,38 +72,115 @@ internal fun TimelineList(
     nowMinutes: Int? = null,
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 80.dp),
-    ) {
-        itemsIndexed(items, key = { index, item ->
-            when (item) {
-                is TimelineItem.Event -> "e-${item.event.id}"
-                is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
-                is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
-            }
-        }) { index, item ->
-            TimelineNode(
-                isFirst = index == 0,
-                isLast = index == items.lastIndex,
-                item = item,
-            ) {
+    // 用 LazyListState 直接取可见 item 在视口内的 offset/size，避免 onPlaced 坐标空间错位。
+    val listState = rememberLazyListState()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 80.dp),
+        ) {
+            itemsIndexed(items, key = { index, item ->
                 when (item) {
-                    is TimelineItem.Event -> EventCard(
-                        item = item,
-                        nowMinutes = nowMinutes,
-                        onClick = { onSelectEvent(item) },
-                    )
-                    is TimelineItem.OverlapGroup -> ParallelEventCards(
-                        group = item,
-                        events = events,
-                        nowMinutes = nowMinutes,
-                        onSelectEvent = onSelectEvent,
-                    )
-                    is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
+                    is TimelineItem.Event -> "e-${item.event.id}"
+                    is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
+                    is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
+                }
+            }) { index, item ->
+                TimelineNode(
+                    isFirst = index == 0,
+                    isLast = index == items.lastIndex,
+                    item = item,
+                ) {
+                    when (item) {
+                        is TimelineItem.Event -> EventCard(
+                            item = item,
+                            nowMinutes = nowMinutes,
+                            onClick = { onSelectEvent(item) },
+                        )
+                        is TimelineItem.OverlapGroup -> ParallelEventCards(
+                            group = item,
+                            events = events,
+                            nowMinutes = nowMinutes,
+                            onSelectEvent = onSelectEvent,
+                        )
+                        is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
+                    }
                 }
             }
         }
+
+        // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示，
+        // 位置直接由 LazyListState 的可见 item 信息插值得到，随滚动与当前时间实时更新。
+        if (nowMinutes != null) {
+            val bottomPadPx = with(LocalDensity.current) { 16.dp.roundToPx() }
+            val nowY = computeNowY(listState, items, nowMinutes, bottomPadPx)
+            if (nowY != null) {
+                NowLine(y = nowY)
+            }
+        }
+    }
+}
+
+/**
+ * 根据 LazyListState 中可见 item 的实际视口位置，计算「现在」(now, 分钟) 在列表中的 y 像素。
+ * 落在可见 item 时间范围内时，按其在「卡片区」(去掉内容区底部 [bottomPadPx] 留白) 内的时间占比插值；
+ * 这样 now 线的起点/终点与左侧时间标签（卡片顶/底）严格对齐。当前时刻不可见时返回 null。
+ */
+private fun computeNowY(
+    listState: LazyListState,
+    items: List<TimelineItem>,
+    now: Int,
+    bottomPadPx: Int,
+): Float? {
+    val layoutInfo = listState.layoutInfo
+    for (info in layoutInfo.visibleItemsInfo) {
+        val item = items.getOrNull(info.index) ?: continue
+        val (start, end) = when (item) {
+            is TimelineItem.Event -> item.event.startMinutes to item.event.endMinutes
+            is TimelineItem.OverlapGroup -> item.startMinutes to item.endMinutes
+            is TimelineItem.Gap -> item.startMinutes to item.endMinutes
+        }
+        if (now in start until end) {
+            val span = (end - start).coerceAtLeast(1)
+            val frac = (now - start).toFloat() / span
+            val contentHeight = (info.size - bottomPadPx).coerceAtLeast(1)
+            return info.offset + frac * contentHeight
+        }
+    }
+    return null
+}
+
+/**
+ * 整轴「现在」红线：仅在左侧时间轴留白区（列表左 padding 12.dp ~ 卡片左缘 90.dp）画一条
+ * 短横线 + 圆点，对齐竖向节点列中心；不进入卡片内容区，避免横穿卡片。
+ * 位置由 LazyListState 可见 item 信息插值得出，随 now / 滚动实时移动。
+ */
+@Composable
+private fun NowLine(y: Float) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset { IntOffset(0, y.toInt()) },
+    ) {
+        // 横线：仅左侧留白（时间标签右缘 58.dp ~ 卡片左缘 90.dp），不压卡片。
+        Box(
+            modifier = Modifier
+                .padding(start = 58.dp)
+                .width(32.dp)
+                .height(2.dp)
+                .background(ProgressRed),
+        )
+        // 圆点：对齐左侧竖向节点列中心（contentPadding.start 12.dp + 节点 62.dp = 74.dp）。
+        // 圆点宽 10.dp，故左移 5.dp 让圆心正好落在节点中心线上，而非偏到右侧。
+        Box(
+            modifier = Modifier
+                .offset { IntOffset((74.dp - 5.dp).roundToPx(), (-4).dp.roundToPx()) }
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(ProgressRed),
+        )
     }
 }
 
@@ -153,15 +236,28 @@ private fun TimelineNode(
         Box(
             modifier = Modifier
                 .width(46.dp)
-                .padding(top = 12.dp),
+                .fillMaxHeight(),
             contentAlignment = Alignment.TopEnd,
         ) {
-            Text(
-                text = TimeFormat.minutesToHm(item.startMinutes),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 16.dp),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = TimeFormat.minutesToHm(item.startMinutes),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = TimeFormat.minutesToHm(item.endMinutes),
+                    color = MaterialTheme.colorScheme.outline,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Normal,
+                )
+            }
         }
         Spacer(modifier = Modifier.width(32.dp))
         Box(
@@ -186,6 +282,7 @@ private fun EventCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    fillHeight: Boolean = false,
 ) {
     val event = item.event
     val dark = LocalDarkTheme.current
@@ -205,7 +302,7 @@ private fun EventCard(
     Box(modifier = modifier.fillMaxWidth()) {
         Card(
             onClick = onClick,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = if (fillHeight) Modifier.fillMaxWidth().fillMaxHeight() else Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = cardContainer),
         ) {
@@ -261,16 +358,23 @@ private fun EventCard(
             }
         }
 
-        // 进行中：卡片顶部进度线，宽度 = 已过时长占比，标明当前进行到哪。
+        // 进行中：卡片左侧竖线进度，红线由上往下实时填充，标明当前进行到哪。
         if (inProgress) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(progressFraction)
-                    .height(3.dp)
-                    .align(Alignment.TopStart)
-                    .clip(RoundedCornerShape(topStart = 16.dp, bottomEnd = 16.dp))
-                    .background(colors.accent),
-            )
+                    .align(Alignment.CenterStart)
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(progressFraction)
+                        .background(ProgressRed),
+                )
+            }
         }
     }
 }
@@ -286,6 +390,12 @@ private val PARALLEL_MAX_LANE_HEIGHT = 600.dp
 
 /** 卡片最小可读高度：保证时间、团队、类型至少可见。 */
 private val PARALLEL_MIN_CARD_HEIGHT = 96.dp
+
+/** 并行轨道内相邻卡片之间的视觉间隙，避免时间连续的卡片贴在一起像一块。 */
+private val PARALLEL_CARD_GAP = 4.dp
+
+/** 进行中竖线进度颜色（红线）。 */
+private val ProgressRed = Color(0xFFE53935)
 
 @Composable
 private fun ParallelEventCards(
@@ -366,9 +476,11 @@ private fun EventLane(
                     nowMinutes = nowMinutes,
                     onClick = { onSelectEvent(item) },
                     compact = true,
+                    fillHeight = true,
                     modifier = Modifier
                         .offset(y = cardOffset)
-                        .height(cardHeight),
+                        .height(cardHeight)
+                        .padding(bottom = PARALLEL_CARD_GAP),
                 )
             }
         }

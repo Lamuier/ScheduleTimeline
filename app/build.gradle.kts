@@ -18,6 +18,7 @@ val releaseSigningConfigured = listOf(
 
 android {
     namespace = "com.lamuier.scheduletimeline"
+    buildToolsVersion = "36.1.0"
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -28,8 +29,8 @@ android {
         applicationId = "com.lamuier.scheduletimeline"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.6.1"
+        versionCode = 15
+        versionName = "1.7.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }

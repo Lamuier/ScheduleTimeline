@@ -30,7 +30,7 @@ object BackgroundRestrictionHelper {
     )
 
     /** 当前设备的厂商引导，未识别时 webUrl 指向 dontkillmyapp 首页。 */
-    fun guideFor(manufacturer: String = Build.MANUFACTURER): Guide {
+    private fun guideFor(manufacturer: String = Build.MANUFACTURER): Guide {
         val m = manufacturer.lowercase().trim()
         return when {
             m == "xiaomi" || m == "redmi" -> Guide(
