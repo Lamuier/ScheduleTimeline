@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.lamuier.scheduletimeline.ScheduleApplication
+import com.lamuier.scheduletimeline.widget.ScheduleWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -27,6 +28,8 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
                     application.notificationCoordinator.refresh()
                 }
             }
+            // 通知刷新后同步桌面小组件
+            runCatching { ScheduleWidgetUpdater.refreshAll(context) }
             pendingResult.finish()
         }
     }

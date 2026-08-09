@@ -6,6 +6,7 @@ import com.lamuier.scheduletimeline.data.NotificationPreferences
 import com.lamuier.scheduletimeline.data.ScheduleRepository
 import com.lamuier.scheduletimeline.data.ThemePreferences
 import com.lamuier.scheduletimeline.notification.ScheduleNotificationCoordinator
+import com.lamuier.scheduletimeline.widget.ScheduleWidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,8 @@ class ScheduleApplication : Application() {
     fun refreshNotifications() {
         applicationScope.launch {
             runCatching { notificationCoordinator.refresh() }
+            // 同步刷新桌面小组件，与通知栏共享同一日程状态
+            runCatching { ScheduleWidgetUpdater.refreshAll(this@ScheduleApplication) }
         }
     }
 }

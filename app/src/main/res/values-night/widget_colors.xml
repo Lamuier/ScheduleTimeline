@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_background">#141318</color>
+    <color name="widget_surface">#1E1C24</color>
+    <color name="widget_on_surface">#EDEAF6</color>
+    <color name="widget_on_surface_variant">#ABA8B8</color>
+    <color name="widget_primary">#A48FFF</color>
+    <color name="widget_outline">#37343F</color>
+    <color name="widget_chip_performance">#A48FFF</color>
+    <color name="widget_chip_performance_bg">#3B2B8C</color>
+    <color name="widget_chip_tokuten">#EDEAF6</color>
+    <color name="widget_chip_tokuten_bg">#8C1D53</color>
+</resources>

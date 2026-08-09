@@ -137,4 +137,16 @@
 
     <string name="gap_label">空闲 %1$s</string>
     <string name="gap_ongoing">(%1$s)</string>
+
+    <string name="widget_status_ongoing">正在进行</string>
+    <string name="widget_status_ongoing_multiple">%1$d 项进行中</string>
+    <string name="widget_status_upcoming">下一项</string>
+    <string name="widget_status_finished">今日已结束</string>
+    <string name="widget_empty_today">今日无日程</string>
+    <string name="widget_empty_today_hint">今日无日程，点击添加</string>
+    <string name="widget_date_with_weekday">%1$s %2$s</string>
+    <string name="widget_small_date_format">M/d</string>
+    <string name="widget_upcoming_later">%1$s %2$s 开始</string>
+    <string name="widget_small_description">查看当前进行中或下一项日程</string>
+    <string name="widget_large_description">展示今日全部日程</string>
 </resources>
