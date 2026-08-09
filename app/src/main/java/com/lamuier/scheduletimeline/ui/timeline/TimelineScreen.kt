@@ -65,24 +65,62 @@ fun TimelineScreen(
         baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
     }
 
+    // 防「保存事件返回后 pager 重组合瞬间误 settle 到相邻页（10000→10001）
+    // 导致日期跳到第二天」：
+    //  - programmaticScroll：VM 改期触发的程序化滚动期间，忽略 pager 回调；
+    //  - wasScrolling：只在用户真实拖拽（isScrollInProgress 曾为 true）产生的
+    //    settle 才更新日期；其余（重组合 / 布局抖动）视为误 settle，把 pager
+    //    吸附回当前日期对应的页，不改变 currentDate。
+    var programmaticScroll by remember { mutableStateOf(false) }
+    var wasScrolling by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.isScrollInProgress }.collect { inProgress ->
+            if (inProgress) wasScrolling = true
+        }
+    }
+
     // 分页落定 → 同步到 ViewModel（驱动 TopBar 与数据层）
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
-            val date = dateForPage(page)
-            if (date != viewModel.currentDate.value) {
-                viewModel.changeDate(date)
+            if (programmaticScroll) {
+                wasScrolling = false
+                return@collect
+            }
+            val expected = DAY_PAGE_CENTER +
+                (viewModel.currentDate.value.toEpochDay() - baseDate.toEpochDay()).toInt()
+            if (page == expected) {
+                wasScrolling = false
+                return@collect
+            }
+            if (wasScrolling) {
+                // 真实用户滑动：采用该页对应的日期
+                wasScrolling = false
+                val date = dateForPage(page)
+                if (date != viewModel.currentDate.value) viewModel.changeDate(date)
+            } else {
+                // 误 settle（重组合 / 布局抖动）：吸附回正确页，不改日期
+                programmaticScroll = true
+                pagerState.scrollToPage(expected)
+                delay(350)
+                programmaticScroll = false
             }
         }
     }
+
     // 外部改期（按钮、日期选择器、返回今天、空状态跳转）→ 驱动分页
     LaunchedEffect(currentDate) {
         val target = DAY_PAGE_CENTER + (currentDate.toEpochDay() - baseDate.toEpochDay()).toInt()
         if (pagerState.currentPage != target) {
+            programmaticScroll = true
             if (abs(target - pagerState.currentPage) <= 3) {
                 pagerState.animateScrollToPage(target)
             } else {
                 pagerState.scrollToPage(target)
             }
+            // 动画 + 吸附完成后再放开；真实用户滑动通常不会落在这 400ms 窗口内
+            delay(400)
+            programmaticScroll = false
         }
     }
 

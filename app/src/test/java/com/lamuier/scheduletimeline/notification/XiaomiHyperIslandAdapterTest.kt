@@ -52,7 +52,7 @@ class XiaomiHyperIslandAdapterTest {
     }
 
     @Test
-    fun payloadMatchesToolKitCountdownTemplate() {
+    fun payloadIsImageTextOnlyWithoutTimer() {
         val root = JSONObject(
             XiaomiHyperIslandAdapter.buildJsonParam(
                 title = "下一项：StarDiary演出",
@@ -61,9 +61,6 @@ class XiaomiHyperIslandAdapterTest {
                 islandTitle = "StarDiary",
                 islandContent = "演出",
                 timerSuffix = "后开场",
-                startMillis = 1_800_000_000_000L,
-                upcoming = true,
-                nowMillis = 1_799_999_000_000L,
             ),
         )
         val param = root.getJSONObject("param_v2")
@@ -77,14 +74,15 @@ class XiaomiHyperIslandAdapterTest {
         assertFalse(param.has("orderId"))
         assertFalse(param.has("sequence"))
         assertFalse(param.has("tickerPic"))
-        val timer = param.getJSONObject("param_island")
-            .getJSONObject("bigIslandArea")
-            .getJSONObject("sameWidthDigitInfo")
-            .getJSONObject("timerInfo")
-        assertEquals(-1, timer.getInt("timerType"))
-        assertEquals(1_799_999_000_000L, timer.getLong("timerTotal"))
-        assertEquals(1_799_999_000_000L, timer.getLong("timerSystemCurrent"))
-        assertTrue(timer.getLong("timerWhen") > timer.getLong("timerSystemCurrent"))
+
+        val big = param.getJSONObject("param_island").getJSONObject("bigIslandArea")
+        // 右区不再挂任何计时组件，避免压缩左区文字（issue #2）
+        assertFalse(big.has("fixedWidthDigitInfo"))
+        assertFalse(big.has("sameWidthDigitInfo"))
+        // 倒计时说明并入左区 content
+        val areaAText = big.getJSONObject("imageTextInfoLeft").getJSONObject("textInfo")
+        assertEquals("StarDiary", areaAText.getString("title"))
+        assertEquals("演出 · 后开场", areaAText.getString("content"))
     }
 
     @Test
@@ -97,25 +95,21 @@ class XiaomiHyperIslandAdapterTest {
                 islandTitle = "StarDiary",
                 islandContent = "演出",
                 timerSuffix = "后开场",
-                startMillis = 1_800_000_000_000L,
-                upcoming = true,
-                nowMillis = 1_799_999_000_000L,
             ),
         ).getJSONObject("param_v2").getJSONObject("param_island")
         val big = param.getJSONObject("bigIslandArea")
 
-        // A 区图文组件1：图标 + 大字 + 后置小字
+        // A 区图文组件：图标 + 大字 + 后置小字（含倒计时说明）
         val areaA = big.getJSONObject("imageTextInfoLeft")
         assertEquals(1, areaA.getInt("type"))
         assertEquals("miui.focus.pic_schedule", areaA.getJSONObject("picInfo").getString("pic"))
         val areaAText = areaA.getJSONObject("textInfo")
         assertEquals("StarDiary", areaAText.getString("title"))
-        assertEquals("演出", areaAText.getString("content"))
+        assertEquals("演出 · 后开场", areaAText.getString("content"))
 
-        // B 区等宽数字组件：计时器 + 小字后缀
-        val areaB = big.getJSONObject("sameWidthDigitInfo")
-        assertEquals("后开场", areaB.getString("content"))
-        assertTrue(areaB.has("timerInfo"))
+        // 右区计时组件已移除
+        assertFalse(big.has("fixedWidthDigitInfo"))
+        assertFalse(big.has("sameWidthDigitInfo"))
 
         // 小岛：应用图标
         assertEquals(
@@ -134,9 +128,6 @@ class XiaomiHyperIslandAdapterTest {
                 islandTitle = "上岛测试",
                 islandContent = "",
                 timerSuffix = "",
-                startMillis = 1_800_000_000_000L,
-                upcoming = true,
-                nowMillis = 1_799_999_000_000L,
             ),
         ).getJSONObject("param_v2").getJSONObject("param_island")
         val big = param.getJSONObject("bigIslandArea")
@@ -144,11 +135,13 @@ class XiaomiHyperIslandAdapterTest {
         assertFalse(
             big.getJSONObject("imageTextInfoLeft").getJSONObject("textInfo").has("content"),
         )
-        assertFalse(big.getJSONObject("sameWidthDigitInfo").has("content"))
+        // 无计时组件
+        assertFalse(big.has("fixedWidthDigitInfo"))
+        assertFalse(big.has("sameWidthDigitInfo"))
     }
 
     @Test
-    fun payloadUsesCountUpForActiveSchedule() {
+    fun activeScheduleFoldsStartedSuffixIntoContent() {
         val param = JSONObject(
             XiaomiHyperIslandAdapter.buildJsonParam(
                 title = "StarDiary正在进行",
@@ -157,20 +150,15 @@ class XiaomiHyperIslandAdapterTest {
                 islandTitle = "StarDiary",
                 islandContent = "演出",
                 timerSuffix = "已开场",
-                startMillis = 1_800_000_000_000L,
-                upcoming = false,
-                nowMillis = 1_800_000_600_000L,
             ),
         ).getJSONObject("param_v2")
 
-        val timer = param.getJSONObject("param_island")
+        val areaAText = param.getJSONObject("param_island")
             .getJSONObject("bigIslandArea")
-            .getJSONObject("sameWidthDigitInfo")
-            .getJSONObject("timerInfo")
-        assertEquals(1, timer.getInt("timerType"))
-        assertEquals(1_800_000_000_000L, timer.getLong("timerTotal"))
-        assertEquals(1_800_000_000_000L, timer.getLong("timerSystemCurrent"))
-        assertEquals(timer.getLong("timerWhen"), timer.getLong("timerSystemCurrent"))
+            .getJSONObject("imageTextInfoLeft")
+            .getJSONObject("textInfo")
+        // 进行中：左区 content 折叠「类型 · 已开场」
+        assertEquals("演出 · 已开场", areaAText.getString("content"))
     }
 
     @Test
@@ -183,14 +171,11 @@ class XiaomiHyperIslandAdapterTest {
                 islandTitle = "StarDiary",
                 islandContent = "演出",
                 timerSuffix = "后开场",
-                startMillis = 1_800_000_000_000L,
-                upcoming = true,
-                nowMillis = 1_799_999_000_000L,
             ),
         ).getJSONObject("param_v2")
 
-        // 常驻 live 通知不应首次浮出或自动展开岛屿，避免打扰
-        assertFalse(param.getBoolean("enableFloat"))
+        // 允许岛屿浮出 / 展开以展示左区文字，但不强制首次自动展开，避免打扰
+        assertTrue(param.getBoolean("enableFloat"))
         assertFalse(param.getBoolean("islandFirstFloat"))
     }
 }

@@ -57,8 +57,6 @@ object XiaomiHyperIslandAdapter {
                     R.string.notification_island_suffix_started
                 },
             ),
-            startMillis = startMillis,
-            upcoming = upcoming,
         )
     }
 
@@ -71,8 +69,6 @@ object XiaomiHyperIslandAdapter {
         islandTitle: String,
         islandContent: String,
         timerSuffix: String,
-        startMillis: Long,
-        upcoming: Boolean,
     ): Boolean {
         if (!XiaomiHyperIslandCapabilityReader.isSupported(context)) {
             return false
@@ -90,9 +86,6 @@ object XiaomiHyperIslandAdapter {
                     islandTitle = islandTitle,
                     islandContent = islandContent,
                     timerSuffix = timerSuffix,
-                    startMillis = startMillis,
-                    upcoming = upcoming,
-                    nowMillis = System.currentTimeMillis(),
                 ),
             )
             true
@@ -117,7 +110,8 @@ object XiaomiHyperIslandAdapter {
 
     /**
      * Minimal ParamV2 payload matching HyperIsland-ToolKit's standard template output.
-     * The timer fields are refreshed on every notification update in milliseconds.
+     * Follows the official "info" big-island template (setBigIslandInfo): only
+     * imageTextInfoLeft carries content, no right-area timer digit component.
      */
     internal fun buildJsonParam(
         title: String,
@@ -126,26 +120,23 @@ object XiaomiHyperIslandAdapter {
         islandTitle: String,
         islandContent: String,
         timerSuffix: String,
-        startMillis: Long,
-        upcoming: Boolean,
-        nowMillis: Long = System.currentTimeMillis(),
     ): String {
-        // TimerInfo semantics follow HyperIsland-ToolKit's reference templates:
-        //  - countdown (timerType=-1): timerWhen = end timestamp, timerTotal and
-        //    timerSystemCurrent = the system time at which the payload was built.
-        //  - count-up (timerType=1): all three fields = the start timestamp.
-        val timer = JSONObject().apply {
-            put("timerType", if (upcoming) -1 else 1)
-            put("timerWhen", startMillis)
-            put("timerTotal", if (upcoming) nowMillis else startMillis)
-            put("timerSystemCurrent", if (upcoming) nowMillis else startMillis)
-        }
+        // 纯图文大岛（对齐 HyperIsland-ToolKit 的 setBigIslandInfo）：
+        // 仅 A 区(摄像头左侧)图标 + 团队名 + 类型 / 倒计时说明，不挂右侧计时
+        // 组件。实测 HyperOS 3 在同时挂右侧计时组件时会压缩 A 区、丢弃左文字
+        // （issue #2），故去掉右区计时，倒计时说明并入左区 content，秒级精度
+        // 由 Status Chip 的 setWhen() 提供。enableFloat=true 让大岛可展开显示
+        // 左文字（islandFirstFloat=false 不强制首次自动展开，避免打扰）。
         val picInfo = JSONObject().apply {
             put("type", 1)
             put("pic", PICTURE_REF)
-            put("loop", false)
-            put("autoplay", false)
-            put("number", 0)
+        }
+        val leftContent = buildString {
+            if (islandContent.isNotEmpty()) append(islandContent)
+            if (timerSuffix.isNotEmpty()) {
+                if (isNotEmpty()) append(" · ")
+                append(timerSuffix)
+            }
         }
         val paramIsland = JSONObject().apply {
             put("islandProperty", 1)
@@ -155,27 +146,17 @@ object XiaomiHyperIslandAdapter {
             put("maxSize", false)
             put("needCloseAnimation", true)
             put("bigIslandArea", JSONObject().apply {
-                // Official capsule template "图文组件1 + 等宽数字文本组件":
-                // A area (left of the camera cutout) = icon + title + trailing note;
-                // B area (right) = equal-width timer digits + suffix text.
+                // 纯图文：仅 A 区(摄像头左侧)图标 + 团队名大字 + 类型/倒计时小字。
+                // 不挂任何右区计时组件，避免系统压缩 A 区导致左文字丢失。
                 put("imageTextInfoLeft", JSONObject().apply {
                     put("type", 1)
                     put("picInfo", picInfo)
                     put("textInfo", JSONObject().apply {
                         put("title", islandTitle)
-                        if (islandContent.isNotEmpty()) {
-                            put("content", islandContent)
+                        if (leftContent.isNotEmpty()) {
+                            put("content", leftContent)
                         }
-                        put("showHighlightColor", false)
                     })
-                })
-                put("sameWidthDigitInfo", JSONObject().apply {
-                    put("timerInfo", timer)
-                    if (timerSuffix.isNotEmpty()) {
-                        put("content", timerSuffix)
-                    }
-                    put("showHighlightColor", true)
-                    put("turnAnim", false)
                 })
             })
             put("smallIslandArea", JSONObject().apply {
@@ -194,7 +175,7 @@ object XiaomiHyperIslandAdapter {
             put("business", BUSINESS_NAME)
             put("updatable", true)
             put("ticker", title)
-            put("enableFloat", false)
+            put("enableFloat", true)
             put("isShowNotification", true)
             put("islandFirstFloat", false)
             put("param_island", paramIsland)

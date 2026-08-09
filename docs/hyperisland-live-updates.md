@@ -53,7 +53,7 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
   协议值读不到时按 OS3 候选处理；不申请白名单、不接入 MiPush。
 
 - **上岛机制**：OS3 使用普通 Android 通知作承载，应用在同一 `LIVE_NOTIFICATION_ID`（`4101`）上更新 `miui.focus.param`（标准 `param_v2`）和 `miui.focus.pics`。JSON 使用 HyperIsland-ToolKit 同款 `protocol=3` 与 `updatable=true`，边界刷新不会产生重复通知。该 payload 作为旧版 OS3 表面的兼容保留，但**上岛的关键是 promoted ongoing 请求**（见核心结论）。
-- **胶囊/岛渲染**：未来日程用 `TimerInfo.timerType=-1` 倒计时；进行中日程用 `timerType=1` 正计时。摘要态胶囊按官方《小米超级岛模板库》「图文组件1 + 等宽数字文本组件」模板渲染：A 区（摄像头左侧）为彩色应用图标 + 团队名大字 + 类型小字（多项并行时显示「N 项日程 / 进行中」），B 区（右侧）为等宽计时数字 + 「后开场 / 已开场」后缀；小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。展开岛显示日程标题、具体日期/时间和计时信息。
+- **胶囊/岛渲染**：大岛为纯图文（对齐 HyperIsland-ToolKit `setBigIslandInfo`）：仅 A 区（摄像头左侧）图标 + 团队名大字 + 类型 / 倒计时说明小字（倒计时说明「后开场 / 已开场」并入左区 `content`，秒级精度由 Status Chip 的 `setWhen()` 补足），**不挂右侧计时组件**——实测 HyperOS 3 在同时挂右侧计时组件时会压缩 A 区、丢弃左文字（issue #2）。小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。`enableFloat=true` 让大岛可展开显示左文字，`islandFirstFloat=false` 不强制首次自动展开。
 - **最终呈现由系统决定**：HyperOS SystemUI 决定尺寸、动画、是否显示在顶部状态栏及用户权限；应用不伪造 HyperIsland 状态。关闭通知、无可发布权限或无下一项时，取消同一通知 ID。
 - **实现约束**：直接生成标准模板 payload，不依赖 Kotlin 2.2 编译的第三方二进制，保持工程 Kotlin 2.0.21 基线；不使用自定义 `RemoteViews`，也不设置 Xiaomi `timeout` 字段以避免分钟/秒单位差异。
 
@@ -65,8 +65,8 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
 
 | 日程状态 | HyperIsland 内容 |
 |---|---|
-| 未来待办 | `baseInfo` 显示“下一项”标题、团队/类型、具体日期和开始时间；`param_island` 使用 `timerType=-1`，并以 `timerWhen - timerSystemCurrent` 倒计时 |
-| 单项进行中 | `baseInfo` 显示当前团队和结束时间；`timerType=1`，并以 `timerSystemCurrent - timerWhen` 显示正计时 |
+| 未来待办 | `baseInfo` 显示“下一项”标题、团队/类型、具体日期和开始时间；`param_island.imageTextInfoLeft` 显示图标 + 团队名 + 「类型 · 后开场」 |
+| 单项进行中 | `baseInfo` 显示当前团队和结束时间；`imageTextInfoLeft` 显示「类型 · 已开场」 |
 | 多项并行中 | Android 通知正文显示全部活动，HyperIsland 展示当前通知标题和合并计时窗口 |
 | 无下一项 / 通知关闭 | 取消 `4101`，不留下 HyperIsland extras |
 
@@ -91,13 +91,13 @@ miui.focus.pics   -> miui.focus.pic_schedule        # 注：pic_ticker 已在调
 | protocol | 3（ParamV2 默认值，会序列化） | 3 | ✅ |
 | updatable | true（默认值，会序列化） | true | ✅ |
 | business / ticker | 构造参数 | `schedule_timeline` / title | ✅ |
-| enableFloat / islandFirstFloat | demo 默认 true/true（builder 字段） | 测试通知 true/true，live 通知 false/false | ✅ 参数化合理 |
+| enableFloat / islandFirstFloat | demo 默认 true/true（builder 字段） | 测试通知 true/false，live 通知 true/false | ✅ 参数化合理 |
 | baseInfo | type/title/subTitle/content/picFunction | 同款 | ✅ |
-| picInfo | type/pic/loop/autoplay/number（默认全序列化） | 1/ref/false/false/0 | ✅ |
+| picInfo | type/pic（loop/autoplay/number 可选） | 1/ref（移除未引用的可选字段） | ✅ |
 | param_island | islandProperty/islandPriority/islandOrder/dismissIsland/maxSize/needCloseAnimation | 全对齐 | ✅ |
-| sameWidthDigitInfo | timerInfo/showHighlightColor=true/turnAnim=false | 同款 | ✅ |
-| timerInfo 倒计时 | (-1, 结束时刻, now, now) | upcoming: (-1, startMillis, now, now) | ✅ |
-| timerInfo 正计时 | (1, start, start, start) | (1, startMillis, startMillis, startMillis) | ✅ |
+| imageTextInfoLeft | type/picInfo/textInfo(title/content) | 同款（仅 A 区图标 + 文字，无右侧计时组件） | ✅ |
+| imageTextInfoLeft.textInfo | title=团队名，content=「类型 · 后开场/已开场」 | 同款 | ✅ |
+| 右侧计时组件 | 无 | 已移除（实测会压缩 A 区丢左文字） | ✅ 规避 issue #2 |
 | 已删除字段 | notifyId/orderId/tickerPic 在模型中可选，`sequence` 不存在 | 已全部删除 | ✅ 安全 |
 
 payload 结构与字段值均无出入，可排除 JSON 解析失败的假设。
