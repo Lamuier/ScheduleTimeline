@@ -57,17 +57,13 @@ private class ScheduleWidgetFactory(
         views.setTextViewText(R.id.widget_item_title, team)
         views.setTextViewText(R.id.widget_item_chip, EventLabels.typeChip(event))
 
-        val (chipColor, chipBg) = chipColors(type)
+        val (chipColor, chipBgRes) = chipColors(type)
         views.setTextColor(R.id.widget_item_chip, appContext.getColor(chipColor))
-        views.setInt(R.id.widget_item_chip, "setBackgroundColor", appContext.getColor(chipBg))
+        views.setInt(R.id.widget_item_chip, "setBackgroundResource", chipBgRes)
 
         views.setTextColor(R.id.widget_item_time, appContext.getColor(R.color.widget_primary))
         views.setTextColor(R.id.widget_item_title, appContext.getColor(R.color.widget_on_surface))
-        views.setInt(
-            R.id.widget_item_root,
-            "setBackgroundColor",
-            appContext.getColor(R.color.widget_surface),
-        )
+        // item root 背景已在 XML 中设置圆角 drawable
 
         // 点击单项同样回到主屏（编辑跳转需 Compose 导航参数，留待后续）
         val fillIntent = Intent().apply {
@@ -79,13 +75,14 @@ private class ScheduleWidgetFactory(
 
     private fun chipColors(type: EventType): Pair<Int, Int> = when (type) {
         EventType.PERFORMANCE ->
-            R.color.widget_chip_performance to R.color.widget_chip_performance_bg
+            R.color.widget_chip_performance to R.drawable.widget_chip_performance
         EventType.TOKUTEN ->
-            R.color.widget_chip_tokuten to R.color.widget_chip_tokuten_bg
+            R.color.widget_chip_tokuten to R.drawable.widget_chip_tokuten
     }
 
     override fun getLoadingView(): RemoteViews? = null
     override fun getViewTypeCount(): Int = 1
     override fun getItemId(position: Int): Long = position.toLong()
     override fun hasStableIds(): Boolean = true
+    override fun onDestroy() = Unit
 }

@@ -70,7 +70,9 @@ object ScheduleWidgetUpdater {
 
     private fun openAppIntent(context: Context): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
             context,
@@ -80,7 +82,24 @@ object ScheduleWidgetUpdater {
         )
     }
 
-    /** 2×1 紧凑卡：状态行 + 主标题 + 时间副行。 */
+    /** 带事件 id 的跳转：点击小组件日程项直达该事件编辑页。 */
+    private fun openEventIntent(context: Context, eventId: Long): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID, eventId)
+        }
+        // 用事件 id 作 requestCode，避免不同事件的 PendingIntent 被系统合并
+        return PendingIntent.getActivity(
+            context,
+            eventId.toInt(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /** 2×1 紧凑卡：圆角卡片，顶部状态+日期，主标题，可选副标题。 */
     private fun buildSmall(
         context: Context,
         today: LocalDate,
@@ -89,6 +108,12 @@ object ScheduleWidgetUpdater {
         next: ScheduledEventWindow?,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_small)
+
+        val dateText = today.format(
+            DateTimeFormatter.ofPattern(context.getString(R.string.widget_small_date_format)),
+        )
+        val weekday = today.dayOfWeek
+            .getDisplayName(TextStyle.SHORT, Locale.SIMPLIFIED_CHINESE)
 
         val statusText: String
         val mainText: String
@@ -121,11 +146,11 @@ object ScheduleWidgetUpdater {
                 subText = if (eventDate == today) {
                     TimeFormat.minutesToHm(next.event.startMinutes)
                 } else {
-                    val weekday = eventDate.dayOfWeek
+                    val eventWeekday = eventDate.dayOfWeek
                         .getDisplayName(TextStyle.SHORT, Locale.SIMPLIFIED_CHINESE)
                     context.getString(
                         R.string.widget_upcoming_later,
-                        weekday,
+                        eventWeekday,
                         TimeFormat.minutesToHm(next.event.startMinutes),
                     )
                 }
@@ -138,25 +163,43 @@ object ScheduleWidgetUpdater {
                 } else {
                     context.getString(R.string.widget_status_finished)
                 }
-                subText = today.format(DateTimeFormatter.ofPattern(
-                    context.getString(R.string.date_pattern),
-                ))
+                subText = ""
             }
         }
 
         views.setTextViewText(R.id.widget_small_status, statusText)
+        views.setTextViewText(
+            R.id.widget_small_date,
+            context.getString(R.string.widget_date_with_weekday, dateText, weekday),
+        )
         views.setTextViewText(R.id.widget_small_title, mainText)
         views.setTextViewText(R.id.widget_small_subtitle, subText)
+        views.setViewVisibility(
+            R.id.widget_small_subtitle,
+            if (subText.isEmpty()) View.GONE else View.VISIBLE,
+        )
 
         views.setTextColor(R.id.widget_small_status, context.getColor(R.color.widget_primary))
+        views.setTextColor(
+            R.id.widget_small_date,
+            context.getColor(R.color.widget_on_surface_variant),
+        )
         views.setTextColor(R.id.widget_small_title, context.getColor(R.color.widget_on_surface))
         views.setTextColor(
             R.id.widget_small_subtitle,
             context.getColor(R.color.widget_on_surface_variant),
         )
-        views.setInt(R.id.widget_root, "setBackgroundColor", context.getColor(R.color.widget_background))
+        // 背景已在 XML 中用 @drawable/widget_background 设置圆角
 
-        views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(context))
+        // 有主事件（进行中/下一项）时点击直达该事件编辑页，否则仅打开应用
+        val primaryEventId = when {
+            active.isNotEmpty() -> active.first().event.id
+            next != null -> next.event.id
+            else -> null
+        }
+        val clickIntent = primaryEventId?.let { openEventIntent(context, it) }
+            ?: openAppIntent(context)
+        views.setOnClickPendingIntent(R.id.widget_root, clickIntent)
         return views
     }
 
@@ -201,8 +244,7 @@ object ScheduleWidgetUpdater {
             context.getColor(R.color.widget_on_surface_variant),
         )
 
-        views.setInt(R.id.widget_root, "setBackgroundColor", context.getColor(R.color.widget_background))
-        views.setInt(R.id.widget_card, "setBackgroundColor", context.getColor(R.color.widget_surface))
+        // 根布局与列表卡片背景已在 XML 中设置圆角 drawable
 
         val empty = events.isEmpty()
         views.setViewVisibility(R.id.widget_list, if (empty) View.GONE else View.VISIBLE)

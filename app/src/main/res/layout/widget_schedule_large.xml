@@ -4,6 +4,7 @@
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
     android:orientation="vertical"
     android:padding="12dp">
 
@@ -43,13 +44,14 @@
         android:ellipsize="end"
         tools:text="下一项" />
 
-    <LinearLayout
+    <FrameLayout
         android:id="@+id/widget_card"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:layout_marginTop="8dp"
-        android:orientation="vertical">
+        android:background="@drawable/widget_card_background"
+        android:padding="8dp">
 
         <ListView
             android:id="@+id/widget_list"
@@ -67,5 +69,5 @@
             android:visibility="gone"
             tools:visibility="visible"
             tools:text="今日无日程，点击添加" />
-    </LinearLayout>
+    </FrameLayout>
 </LinearLayout>

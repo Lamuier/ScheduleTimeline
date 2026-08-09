@@ -1,6 +1,7 @@
 package com.lamuier.scheduletimeline
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
@@ -9,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,10 +26,15 @@ import androidx.navigation.navArgument
 import com.lamuier.scheduletimeline.ui.edit.EditEventScreen
 import com.lamuier.scheduletimeline.ui.theme.ScheduleTimelineTheme
 import com.lamuier.scheduletimeline.ui.timeline.TimelineScreen
+import com.lamuier.scheduletimeline.widget.ScheduleWidgetProviderLarge
 
 class MainActivity : ComponentActivity() {
+    // 桌面小组件深链：点击日程项直接打开对应事件编辑页（冷启动 / 热启动均生效）
+    private val widgetEventId = mutableStateOf<Long?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleWidgetIntent(intent)
         enableEdgeToEdge()
         setContent {
             val viewModel: ScheduleViewModel = viewModel(
@@ -47,6 +54,15 @@ class MainActivity : ComponentActivity() {
 
             ScheduleTimelineTheme(themeMode = themeMode) {
                 val navController = rememberNavController()
+
+                // 桌面小组件点击日程项深链：打开对应事件编辑页
+                val deepEventId by widgetEventId
+                LaunchedEffect(deepEventId) {
+                    deepEventId?.let { id ->
+                        navController.navigate("edit/$id")
+                        widgetEventId.value = null
+                    }
+                }
 
                 NavHost(
                     navController = navController,
@@ -99,5 +115,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: Intent?) {
+        val id = intent?.getLongExtra(
+            ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID,
+            -1L,
+        ) ?: -1L
+        if (id != -1L) widgetEventId.value = id
     }
 }

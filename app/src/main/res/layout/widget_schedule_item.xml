@@ -4,17 +4,19 @@
     android:id="@+id/widget_item_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/widget_surface_background"
+    android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:padding="10dp"
-    android:gravity="center_vertical">
+    android:padding="8dp">
 
     <TextView
         android:id="@+id/widget_item_time"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:fontFamily="monospace"
         android:textSize="11sp"
         android:textStyle="bold"
-        android:fontFamily="monospace"
         tools:text="14:20~14:40" />
 
     <TextView
@@ -31,10 +33,10 @@
         android:id="@+id/widget_item_title"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
         android:layout_marginStart="6dp"
-        android:textSize="13sp"
-        android:singleLine="true"
+        android:layout_weight="1"
         android:ellipsize="end"
+        android:singleLine="true"
+        android:textSize="13sp"
         tools:text="StarDiary" />
 </LinearLayout>
