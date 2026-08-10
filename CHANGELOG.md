@@ -68,6 +68,7 @@
 ## 未归档
 
 ### 修复
+- 小米超级岛（issue #2）左文字仍不显示：adb 确认 `miui.focus.param` 已挂团队名/类型，但 `airtimeCount=0`（大岛从未展开），常驻表面实际是 Android Status Chip（`shortCriticalText=进行中`）。对照 [HyperIsland ToolKit Big Island](https://hyperisland.d4viddf.com/docs/components/island/big-island/)：① `islandFirstFloat` 改回 ToolKit 默认 `true` 首次自动展开；② 大岛改为左右图文分栏（左团队名 / 右类型+开场说明，仍不用 digit 计时组件）；③ 进行中 Status Chip 短文案改为「团队名+类型」（如 `Star演出`），超长截断团队名。倒计时秒级精度仍由 `setWhen()` 提供
 - 小米超级岛（issue #2）左侧文字丢失排查：HyperOS 3 实测无论大岛同时挂 `sameWidthDigitInfo` 还是 `fixedWidthDigitInfo` 右侧计时组件，都会压缩 A 区、丢弃 `imageTextInfoLeft` 左文字，仅留图标。遂去掉右区计时组件，改为纯图文大岛（对齐 HyperIsland-ToolKit `setBigIslandInfo`）：仅 A 区图标 + 团队名 + 类型 / 倒计时说明（并入左区 `content`），并去掉臆测字段（`narrowFont` / `loop` / `autoplay` / `number`），`enableFloat` 改回 `true` 让大岛可展开显示左文字（`islandFirstFloat=false` 不强制首次自动展开）。倒计时秒级精度仍由 Status Chip 的 `setWhen()` 提供
 - 修复保存事件后时间轴「跳到第二天」：返回编辑页后 `HorizontalPager` 重组合会瞬态误 `settledPage` 到相邻页（10000→10001），被当成真实翻页调用 `changeDate` 改日期形成闪烁。改为用 `isScrollInProgress` 区分真实手指滑动与重组合 / 布局抖动——仅真实滑动更新日期，抖动则把 pager 吸附回当前日期对应页、不改日期；VM 改期触发的程序化滚动期间忽略 pager 回调，避免回声回路
 

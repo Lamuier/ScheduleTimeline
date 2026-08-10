@@ -76,13 +76,16 @@ class XiaomiHyperIslandAdapterTest {
         assertFalse(param.has("tickerPic"))
 
         val big = param.getJSONObject("param_island").getJSONObject("bigIslandArea")
-        // 右区不再挂任何计时组件，避免压缩左区文字（issue #2）
+        // 右区不挂 digit 计时组件，避免压缩左区文字（issue #2）
         assertFalse(big.has("fixedWidthDigitInfo"))
         assertFalse(big.has("sameWidthDigitInfo"))
-        // 倒计时说明并入左区 content
+        // 左区仅团队名；类型 / 倒计时说明在右区图文
         val areaAText = big.getJSONObject("imageTextInfoLeft").getJSONObject("textInfo")
         assertEquals("StarDiary", areaAText.getString("title"))
-        assertEquals("演出 · 后开场", areaAText.getString("content"))
+        assertFalse(areaAText.has("content"))
+        val areaBText = big.getJSONObject("imageTextInfoRight").getJSONObject("textInfo")
+        assertEquals("演出", areaBText.getString("title"))
+        assertEquals("后开场", areaBText.getString("content"))
     }
 
     @Test
@@ -99,15 +102,12 @@ class XiaomiHyperIslandAdapterTest {
         ).getJSONObject("param_v2").getJSONObject("param_island")
         val big = param.getJSONObject("bigIslandArea")
 
-        // A 区图文组件：图标 + 大字 + 后置小字（含倒计时说明）
+        // A 区：图标 + 团队名；B 区：类型 + 倒计时说明（非 digit 计时）
         val areaA = big.getJSONObject("imageTextInfoLeft")
         assertEquals(1, areaA.getInt("type"))
         assertEquals("miui.focus.pic_schedule", areaA.getJSONObject("picInfo").getString("pic"))
-        val areaAText = areaA.getJSONObject("textInfo")
-        assertEquals("StarDiary", areaAText.getString("title"))
-        assertEquals("演出 · 后开场", areaAText.getString("content"))
-
-        // 右区计时组件已移除
+        assertEquals("StarDiary", areaA.getJSONObject("textInfo").getString("title"))
+        assertEquals(2, big.getJSONObject("imageTextInfoRight").getInt("type"))
         assertFalse(big.has("fixedWidthDigitInfo"))
         assertFalse(big.has("sameWidthDigitInfo"))
 
@@ -135,13 +135,14 @@ class XiaomiHyperIslandAdapterTest {
         assertFalse(
             big.getJSONObject("imageTextInfoLeft").getJSONObject("textInfo").has("content"),
         )
-        // 无计时组件
+        // 无类型 / 后缀时不挂右区，也不挂 digit 计时
+        assertFalse(big.has("imageTextInfoRight"))
         assertFalse(big.has("fixedWidthDigitInfo"))
         assertFalse(big.has("sameWidthDigitInfo"))
     }
 
     @Test
-    fun activeScheduleFoldsStartedSuffixIntoContent() {
+    fun activeSchedulePutsStartedSuffixOnRight() {
         val param = JSONObject(
             XiaomiHyperIslandAdapter.buildJsonParam(
                 title = "StarDiary正在进行",
@@ -153,16 +154,18 @@ class XiaomiHyperIslandAdapterTest {
             ),
         ).getJSONObject("param_v2")
 
-        val areaAText = param.getJSONObject("param_island")
-            .getJSONObject("bigIslandArea")
-            .getJSONObject("imageTextInfoLeft")
-            .getJSONObject("textInfo")
-        // 进行中：左区 content 折叠「类型 · 已开场」
-        assertEquals("演出 · 已开场", areaAText.getString("content"))
+        val big = param.getJSONObject("param_island").getJSONObject("bigIslandArea")
+        assertEquals(
+            "StarDiary",
+            big.getJSONObject("imageTextInfoLeft").getJSONObject("textInfo").getString("title"),
+        )
+        val areaBText = big.getJSONObject("imageTextInfoRight").getJSONObject("textInfo")
+        assertEquals("演出", areaBText.getString("title"))
+        assertEquals("已开场", areaBText.getString("content"))
     }
 
     @Test
-    fun livePayloadNeverFloatsOrAutoExpands() {
+    fun livePayloadFloatsAndAutoExpandsOnce() {
         val param = JSONObject(
             XiaomiHyperIslandAdapter.buildJsonParam(
                 title = "下一项：StarDiary演出",
@@ -174,8 +177,8 @@ class XiaomiHyperIslandAdapterTest {
             ),
         ).getJSONObject("param_v2")
 
-        // 允许岛屿浮出 / 展开以展示左区文字，但不强制首次自动展开，避免打扰
+        // 对齐 ToolKit 默认：允许浮出，且首次自动展开以露出左右图文
         assertTrue(param.getBoolean("enableFloat"))
-        assertFalse(param.getBoolean("islandFirstFloat"))
+        assertTrue(param.getBoolean("islandFirstFloat"))
     }
 }

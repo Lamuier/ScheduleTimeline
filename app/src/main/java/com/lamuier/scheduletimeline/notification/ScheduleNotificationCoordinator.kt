@@ -24,6 +24,7 @@ import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.ScheduleRepository
 import com.lamuier.scheduletimeline.data.ScheduledEventWindow
 import com.lamuier.scheduletimeline.data.TimeFormat
+import com.lamuier.scheduletimeline.data.teamDisplay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -319,6 +320,9 @@ class ScheduleNotificationCoordinator(
             nowMillis = nowMillis,
             upcoming = upcoming,
             upcomingChipText = upcomingChipText(events.first(), startMillis, nowMillis, upcoming),
+            // HyperOS 3 常驻岛表面实际是 Android Status Chip：shortCriticalText
+            // 才是摄像头左侧可见文案；原先写死「进行中」导致看不到团队名+类型。
+            activeChipText = activeChipText(events),
         )
 
         val notification = builder.build()
@@ -369,6 +373,26 @@ class ScheduleNotificationCoordinator(
         }
     }
 
+    /**
+     * Status Chip 左侧短文案：单事件用「团队名+类型」（与 EventLabels.displayLabel 一致），
+     * 多事件回退「进行中」。Chip 极窄，超长团队名截断保类型可见。
+     */
+    private fun activeChipText(events: List<ScheduleEvent>): String {
+        if (events.size != 1) {
+            return appContext.getString(R.string.notification_short_text)
+        }
+        val event = events.first()
+        val type = EventLabels.typeChip(event)
+        val team = event.teamDisplay.ifBlank { event.title }
+        if (team.isBlank()) {
+            return appContext.getString(R.string.notification_short_text)
+        }
+        val full = "$team$type"
+        if (full.length <= CHIP_TEXT_MAX_CHARS) return full
+        val teamBudget = (CHIP_TEXT_MAX_CHARS - type.length).coerceAtLeast(1)
+        return team.take(teamBudget) + type
+    }
+
     private fun applyAndroid16LiveUpdate(
         builder: Notification.Builder,
         startMillis: Long,
@@ -376,6 +400,7 @@ class ScheduleNotificationCoordinator(
         nowMillis: Long,
         upcoming: Boolean,
         upcomingChipText: String? = null,
+        activeChipText: String? = null,
     ) {
         if (Build.VERSION.SDK_INT < 36) return
 
@@ -388,7 +413,10 @@ class ScheduleNotificationCoordinator(
         builder.setStyle(progressStyle)
 
         if (!upcoming) {
-            builder.setShortCriticalText(appContext.getString(R.string.notification_short_text))
+            builder.setShortCriticalText(
+                activeChipText
+                    ?: appContext.getString(R.string.notification_short_text),
+            )
         } else if (upcomingChipText != null) {
             builder.setShortCriticalText(upcomingChipText)
         }
@@ -518,6 +546,8 @@ class ScheduleNotificationCoordinator(
         private const val REMINDER_NOTIFICATION_ID_BASE = 5_000
         private const val REMINDER_AUTO_DISMISS_MILLIS = 5 * 60_000L
         private const val CHIP_COUNTDOWN_WINDOW_MINUTES = 120L
+        /** Status Chip 左侧短文案上限（码点），超出优先截断团队名、保留类型后缀。 */
+        private const val CHIP_TEXT_MAX_CHARS = 8
         private const val PROGRESS_REFRESH_MIN_MS = 5_000L
         private const val PROGRESS_REFRESH_MAX_MS = 60_000L
         private const val PROGRESS_REFRESH_STEPS = 100L // 把事件时长均分约 100 段 ≈ 每次刷新推进 1%
