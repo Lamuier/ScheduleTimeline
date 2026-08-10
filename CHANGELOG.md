@@ -13,6 +13,27 @@
 
 ---
 
+## 未归档
+
+## 1.8.1 - 2026-08-10
+
+### 修复
+- 小米超级岛（issue #2）常驻文案与展开：HyperOS 3 常驻表面是 Android Status Chip，进行中 `shortCriticalText` 改为「团队名+类型」（如 `Star演出`）；`islandFirstFloat` 对齐 ToolKit 默认 `true` 首次自动展开；大岛左右图文分栏（左团队名 / 右类型+开场说明），仍不用会压缩左区的 digit 计时组件
+- 修复保存事件后时间轴「跳到第二天」：返回编辑页后 `HorizontalPager` 重组合会瞬态误 `settledPage` 到相邻页，被当成真实翻页改日期。改为用 `isScrollInProgress` 区分真实滑动与重组合抖动，仅真实滑动更新日期
+
+## 1.8.0 - 2026-08-09
+
+### 新增
+- 桌面小组件：新增 2×1 紧凑状态卡与 4×3 今日日程列表两种规格，与通知栏共享同一日程状态（复用 `NotificationSchedule` 计算进行中 / 下一项）；事件保存 / 删除 / 导入 / 清空 / 开机后随通知刷新一并更新；颜色资源走 `values` / `values-night`，随系统夜间模式切换；4×3 列表由 `RemoteViewsService` 异步加载当日日程
+- 桌面小组件点击直达：2×1 小卡点击进行中 / 下一项事件、4×3 列表点击任意日程项，均直接深链打开对应事件编辑页（冷启动与热启动均生效）；小卡无主事件时仅打开应用
+
+### 变更
+- 桌面小组件视觉：根布局与列表项改用圆角卡片背景，演出 / 特典标签也使用圆角背景，颜色随系统夜间模式切换
+
+### 修复
+- 修复 2×1 小尺寸小组件文字被截断：收紧 padding / 字号 / 行距，并把空档 / 结束状态的日期移入顶部状态行，让 2×1 高度下只保留两行核心信息
+- 修复小尺寸小组件默认显示为 3×1：原 `minWidth=180dp` 被启动器按 `(minWidth+30)/70` 公式算成 3 格宽；降至 `110dp`（正好 2 格），并新增 `widget_small_date_format`（M/d）精简顶部日期，避免窄卡下「2026年08月09日 周日」被截断成丑陋的省略号
+
 ## 1.7.0 - 2026-08-09
 
 ### 新增
@@ -51,26 +72,6 @@
 - 新增 `.gitattributes`（`* text=auto eol=lf`）规范化跨平台换行符，并将图片/签名/打包产物标记为二进制，避免协作时 CRLF 冲突或文件损坏
 - 全仓库已跟踪文本文件换行符归一化为 LF（与 `.gitattributes` 的 `eol=lf` 对齐），消除 Windows 工作树 CRLF 造成的假性改动
 - 固定 `buildToolsVersion = "36.1.0"`（在 `app/build.gradle.kts` 的 `android {}` 块）：本机构建机缺 AGP 8.13 默认的 35.0.0，且离线无法下载，故显式固定到已安装的 36.1.0（与 compileSdk 36.1 一致）以保证 Release 可复现
-
-## 1.8.0 - 2026-08-09
-
-### 新增
-- 桌面小组件：新增 2×1 紧凑状态卡与 4×3 今日日程列表两种规格，与通知栏共享同一日程状态（复用 `NotificationSchedule` 计算进行中 / 下一项）；事件保存 / 删除 / 导入 / 清空 / 开机后随通知刷新一并更新；颜色资源走 `values` / `values-night`，随系统夜间模式切换；4×3 列表由 `RemoteViewsService` 异步加载当日日程
-- 桌面小组件点击直达：2×1 小卡点击进行中 / 下一项事件、4×3 列表点击任意日程项，均直接深链打开对应事件编辑页（冷启动与热启动均生效）；小卡无主事件时仅打开应用
-
-### 变更
-- 桌面小组件视觉：根布局与列表项改用圆角卡片背景，演出 / 特典标签也使用圆角背景，颜色随系统夜间模式切换
-
-### 修复
-- 修复 2×1 小尺寸小组件文字被截断：收紧 padding / 字号 / 行距，并把空档 / 结束状态的日期移入顶部状态行，让 2×1 高度下只保留两行核心信息
-- 修复小尺寸小组件默认显示为 3×1：原 `minWidth=180dp` 被启动器按 `(minWidth+30)/70` 公式算成 3 格宽；降至 `110dp`（正好 2 格），并新增 `widget_small_date_format`（M/d）精简顶部日期，避免窄卡下「2026年08月09日 周日」被截断成丑陋的省略号
-
-## 未归档
-
-### 修复
-- 小米超级岛（issue #2）左文字仍不显示：adb 确认 `miui.focus.param` 已挂团队名/类型，但 `airtimeCount=0`（大岛从未展开），常驻表面实际是 Android Status Chip（`shortCriticalText=进行中`）。对照 [HyperIsland ToolKit Big Island](https://hyperisland.d4viddf.com/docs/components/island/big-island/)：① `islandFirstFloat` 改回 ToolKit 默认 `true` 首次自动展开；② 大岛改为左右图文分栏（左团队名 / 右类型+开场说明，仍不用 digit 计时组件）；③ 进行中 Status Chip 短文案改为「团队名+类型」（如 `Star演出`），超长截断团队名。倒计时秒级精度仍由 `setWhen()` 提供
-- 小米超级岛（issue #2）左侧文字丢失排查：HyperOS 3 实测无论大岛同时挂 `sameWidthDigitInfo` 还是 `fixedWidthDigitInfo` 右侧计时组件，都会压缩 A 区、丢弃 `imageTextInfoLeft` 左文字，仅留图标。遂去掉右区计时组件，改为纯图文大岛（对齐 HyperIsland-ToolKit `setBigIslandInfo`）：仅 A 区图标 + 团队名 + 类型 / 倒计时说明（并入左区 `content`），并去掉臆测字段（`narrowFont` / `loop` / `autoplay` / `number`），`enableFloat` 改回 `true` 让大岛可展开显示左文字（`islandFirstFloat=false` 不强制首次自动展开）。倒计时秒级精度仍由 Status Chip 的 `setWhen()` 提供
-- 修复保存事件后时间轴「跳到第二天」：返回编辑页后 `HorizontalPager` 重组合会瞬态误 `settledPage` 到相邻页（10000→10001），被当成真实翻页调用 `changeDate` 改日期形成闪烁。改为用 `isScrollInProgress` 区分真实手指滑动与重组合 / 布局抖动——仅真实滑动更新日期，抖动则把 pager 吸附回当前日期对应页、不改日期；VM 改期触发的程序化滚动期间忽略 pager 回调，避免回声回路
 
 ## 1.6.1 - 2026-08-07
 
