@@ -6,7 +6,7 @@
 
 - **ScheduleTimeline（追程）**：单模块 Android 应用（Kotlin + Jetpack Compose + Room）
 - 用途：录入活动行程，用列表时间轴展示；本地存储，无后端
-- 包名：`com.lamuier.scheduletimeline`（工程/包名不变；用户可见名见 `app_name`）
+- 包名：Release `com.lamuier.scheduletimeline`；Debug `com.lamuier.scheduletimeline.debug`（Kotlin 源码包名不变；用户可见名见 `app_name`）
 - 用户沟通默认用**简体中文**
 
 ## 技术基线
@@ -82,11 +82,24 @@ UI (Compose) → ScheduleViewModel (StateFlow) → ScheduleRepository → Room D
 
 ```powershell
 .\build.ps1                 # Debug
-.\build.ps1 -Install        # Debug + adb 安装
+.\build.ps1 -Install        # Debug + adb 安装（包名带 .debug，不覆盖 Release）
 .\build.ps1 -Release        # 签名打包到 dist/
 .\build.ps1 -SetupSigning   # 配置/重绑签名
 .\build.ps1 -Help           # 参数说明（也支持 --help）
 ```
+
+### 调试包与正式版并存（强制）
+
+真机调试时**禁止**用 Debug 包覆盖 / 卸载本机已安装的 Release（`com.lamuier.scheduletimeline`）：签名不同会触发卸载，用户数据被清空。
+
+| 构建 | applicationId | 用途 |
+| --- | --- | --- |
+| Release | `com.lamuier.scheduletimeline` | 正式版，本机日常使用 |
+| Debug | `com.lamuier.scheduletimeline.debug` | 仅调试；`.\build.ps1 -Install` |
+
+- Debug 已配置 `applicationIdSuffix = ".debug"`，与 Release 可同机共存；启动器显示「追程 Debug」。
+- 助手 / 开发者装调试包时走 `-Install` 或安装 `app-debug.apk`，**不要**对正式包名 `adb uninstall` / `adb install -r` 覆盖。
+- 需要验正式签名或上架包时，另打 `-Release`，再显式安装 `dist/ScheduleTimeline-v*-release.apk`（会与 Debug 并存，仍勿误卸正式数据 unless 用户明确要求重装正式版）。
 
 启动时打印「生效参数」与实际 Gradle 命令行，便于确认开关是否生效。
 正式密钥（一次性）：
@@ -200,6 +213,7 @@ versionName = "X.Y.Z"
 | 升级数据库数据被清空 | 写 Migration，勿对生产用破坏性迁移 |
 | `build.ps1` 找不到 JBR | 安装 Android Studio，或改脚本中的 JBR 路径 |
 | Release 签名失败 | 先 `.\build.ps1 -SetupSigning`；密钥不进仓库 |
+| Debug 装机覆盖正式版 / 清数据 | 用 `.debug` 包名的 Debug APK（`-Install`），勿对正式 `applicationId` uninstall |
 | APK 体积异常变大 | 勿引入 `material-icons-extended` |
 | UI 退到后台仍订阅 | `collectAsStateWithLifecycle` |
 | 编辑页状态与导航串台 | 用 `prepareEdit` / `EditUiState`，进入编辑页时重置 |
@@ -225,3 +239,4 @@ versionName = "X.Y.Z"
 - [ ] `CHANGELOG.md` 未归档是否已追加本轮条目
 - [ ] README / 版本号是否需要更新（不要擅自归档 CHANGELOG 版本节）
 - [ ] 无密钥与构建产物进入暂存区
+- [ ] 真机调试是否用了 `.debug` 包，未动本机 Release

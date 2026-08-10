@@ -49,6 +49,8 @@ android {
 
     buildTypes {
         debug {
+            // 与 Release 并存：不同 applicationId，adb 安装不会覆盖本机正式版
+            applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             isDebuggable = true
         }

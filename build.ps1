@@ -119,7 +119,7 @@ function Write-EffectiveOptions {
     }
 
     $identity = $null
-    try { $identity = Get-AppIdentity } catch { }
+    try { $identity = Get-AppIdentity -Mode $Mode } catch { }
 
     Write-Host ""
     Write-Host "生效参数" -ForegroundColor Cyan
@@ -129,6 +129,9 @@ function Write-EffectiveOptions {
         Write-Host "  applicationId : $($identity.ApplicationId)"
         Write-Host "  versionName   : $($identity.VersionName)"
         Write-Host "  versionCode   : $($identity.VersionCode)"
+        if ($Mode -in @("Debug", "Install")) {
+            Write-Host "  并存说明      : Debug 使用独立包名，不覆盖本机 Release"
+        }
     }
     Write-Host "  Clean         : $($Clean.IsPresent) $(if ($Clean.IsPresent) { '(已开启)' } else { '(未开启)' })"
     Write-Host "  SkipChecks    : $($SkipChecks.IsPresent) $(if ($SkipChecks.IsPresent) { '(跳过 test/lint)' } else { '(将跑 test/lint)' })"
@@ -185,20 +188,32 @@ function Resolve-AndroidSdk {
     throw "找不到 Android SDK 35。已检查: $($candidates -join '; ')"
 }
 
-function Get-AppIdentity {
+function Get-AppIdentity([string]$Mode = "Release") {
     $gradleConfig = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "app\build.gradle.kts")
     $settings = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "settings.gradle.kts")
     $versionCodeMatch = [regex]::Match($gradleConfig, 'versionCode\s*=\s*(\d+)')
     $versionNameMatch = [regex]::Match($gradleConfig, 'versionName\s*=\s*"([^"]+)"')
     $appIdMatch = [regex]::Match($gradleConfig, 'applicationId\s*=\s*"([^"]+)"')
+    $debugSuffixMatch = [regex]::Match(
+        $gradleConfig,
+        'debug\s*\{[\s\S]*?applicationIdSuffix\s*=\s*"([^"]+)"'
+    )
     $rootNameMatch = [regex]::Match($settings, 'rootProject\.name\s*=\s*"([^"]+)"')
     if (-not $versionCodeMatch.Success -or -not $versionNameMatch.Success -or -not $appIdMatch.Success) {
         throw "无法从 app\build.gradle.kts 读取 versionCode / versionName / applicationId"
     }
+    $applicationId = $appIdMatch.Groups[1].Value
+    $versionName = $versionNameMatch.Groups[1].Value
+    if ($Mode -in @("Debug", "Install")) {
+        if ($debugSuffixMatch.Success) {
+            $applicationId = "$applicationId$($debugSuffixMatch.Groups[1].Value)"
+        }
+        $versionName = "$versionName-debug"
+    }
     return [pscustomobject]@{
         VersionCode = [int]$versionCodeMatch.Groups[1].Value
-        VersionName = $versionNameMatch.Groups[1].Value
-        ApplicationId = $appIdMatch.Groups[1].Value
+        VersionName = $versionName
+        ApplicationId = $applicationId
         RootName = if ($rootNameMatch.Success) { $rootNameMatch.Groups[1].Value } else { "App" }
     }
 }
@@ -688,12 +703,14 @@ function Invoke-InstallDebug {
     $adb = Join-Path $sdk "platform-tools\adb.exe"
     if (-not (Test-Path -LiteralPath $adb)) { throw "找不到 adb: $adb" }
 
-    Write-Step "adb install"
+    $identity = Get-AppIdentity -Mode Install
+    Write-Step "adb install ($($identity.ApplicationId)，不覆盖 Release)"
     & $adb devices
     if ($LASTEXITCODE -ne 0) { throw "adb devices 失败" }
     & $adb install -r $apk
     if ($LASTEXITCODE -ne 0) { throw "adb install 失败" }
     Write-Host "已安装: $apk" -ForegroundColor Green
+    Write-Host "  applicationId : $($identity.ApplicationId)" -ForegroundColor Green
 }
 
 function Invoke-ReleasePackage {

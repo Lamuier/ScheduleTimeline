@@ -15,6 +15,9 @@
 
 ## 未归档
 
+### 构建
+- Debug 使用独立包名 `com.lamuier.scheduletimeline.debug`（`applicationIdSuffix`），与本机 Release 并存；`.\build.ps1 -Install` 不再覆盖正式版。约定写入 `AGENTS.md` / `docs/technical.md`，启动器显示「追程 Debug」
+
 ## 1.8.1 - 2026-08-10
 
 ### 修复

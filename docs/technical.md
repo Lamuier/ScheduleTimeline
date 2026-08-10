@@ -8,7 +8,7 @@
 
 ```powershell
 .\build.ps1                 # Debug
-.\build.ps1 -Install        # Debug + adb 安装
+.\build.ps1 -Install        # Debug + adb 安装（独立包名，不覆盖 Release）
 .\build.ps1 -Release        # Release 签名打包到 dist/
 .\build.ps1 -SetupSigning   # 配置/重绑签名
 .\build.ps1 -Help           # 参数说明（也支持 --help）
@@ -18,10 +18,12 @@
 
 默认会跑单测与 lint；加 `-SkipChecks` 可跳过。需要干净构建时加 `-Clean`。
 
-| 产物 | 路径 |
-| --- | --- |
-| Debug | `app\build\outputs\apk\debug\app-debug.apk` |
-| Release | `dist\ScheduleTimeline-vX.Y.Z-release.apk` |
+| 产物 | 路径 | applicationId |
+| --- | --- | --- |
+| Debug | `app\build\outputs\apk\debug\app-debug.apk` | `com.lamuier.scheduletimeline.debug` |
+| Release | `dist\ScheduleTimeline-vX.Y.Z-release.apk` | `com.lamuier.scheduletimeline` |
+
+真机调试必须安装 Debug 包（`.debug` 后缀），与本机正式版并存；禁止对正式包名 `adb uninstall` 再装 Debug，以免清空用户数据。
 
 ### Release 签名
 
@@ -56,8 +58,8 @@ versionCode = N      // 整数，上架递增
 versionName = "X.Y.Z"
 ```
 
-- Debug：自动加 `-debug` 后缀（如 `1.7.0-debug`）。
-- Release：无后缀（如 `1.7.0`）。
+- Debug：`versionName` 自动加 `-debug` 后缀（如 `1.8.1-debug`），且 `applicationIdSuffix = ".debug"`。
+- Release：无后缀（如 `1.8.1`），包名为正式 `applicationId`。
 
 版本级别判定：不向后兼容的接口/数据/权限变更升主版本（X）；向后兼容地新增用户可见能力升次版本（Y）；仅修复与维护升修订版（Z）。发版须先写明「版本判定：当前 → 目标（依据）」。
 
