@@ -81,6 +81,17 @@ class ScheduleRepository(
         }
     }
 
+    /** 清空单日日程；同时清理旧版本可能遗留的关联 id。 */
+    suspend fun clearDay(dayKey: String) {
+        database.withTransaction {
+            val ids = eventDao.getByDay(dayKey).map { it.id }
+            if (ids.isNotEmpty()) {
+                eventDao.clearLinkedPerformances(ids)
+                eventDao.deleteByDay(dayKey)
+            }
+        }
+    }
+
     suspend fun eventsForDay(dayKey: String): List<ScheduleEvent> = eventDao.getByDay(dayKey)
 
     suspend fun allEvents(): List<ScheduleEvent> = eventDao.getAll()

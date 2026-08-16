@@ -167,6 +167,14 @@ class ScheduleViewModel(
         }
     }
 
+    fun clearDayData(date: LocalDate, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.clearDay(date.format(DateTimeFormatter.ISO_LOCAL_DATE))
+            refreshNotifications()
+            onDone()
+        }
+    }
+
     suspend fun exportCurrentDayCsv(): String {
         val events = repository.eventsForDay(currentDayKey())
         return ScheduleExport.toCsv(events)

@@ -94,7 +94,7 @@ import com.lamuier.scheduletimeline.ui.theme.eventTypeColors
 import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 
-private enum class ManageStep { Menu, Import, ClearConfirm }
+private enum class ManageStep { Menu, Import, ClearConfirm, ClearDayConfirm }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,6 +175,7 @@ fun ManageDataSheet(
                             }
                         }
                     },
+                    onClearDay = { currentStep = ManageStep.ClearDayConfirm },
                     onClear = { currentStep = ManageStep.ClearConfirm },
                 )
                 ManageStep.Import -> {
@@ -192,12 +193,38 @@ fun ManageDataSheet(
                     )
                 }
                 ManageStep.ClearConfirm -> ClearConfirmView(
+                    title = stringResource(R.string.clear_all_title),
+                    message = stringResource(R.string.clear_all_message),
+                    confirmText = stringResource(R.string.clear_all_confirm),
                     onBack = { currentStep = ManageStep.Menu },
                     onConfirm = {
                         viewModel.clearAllData()
                         onDismiss()
                     },
                 )
+                ManageStep.ClearDayConfirm -> {
+                    val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
+                    val dayState by viewModel.observeDayState(currentDate)
+                        .collectAsStateWithLifecycle()
+                    val pattern = stringResource(R.string.date_pattern)
+                    val dateText = remember(currentDate, pattern) {
+                        currentDate.format(DateTimeFormatter.ofPattern(pattern))
+                    }
+                    ClearConfirmView(
+                        title = stringResource(R.string.clear_day_title),
+                        message = stringResource(
+                            R.string.clear_day_message,
+                            dateText,
+                            dayState.events.size,
+                        ),
+                        confirmText = stringResource(R.string.clear_day_confirm),
+                        onBack = { currentStep = ManageStep.Menu },
+                        onConfirm = {
+                            viewModel.clearDayData(currentDate)
+                            onDismiss()
+                        },
+                    )
+                }
             }
         }
     }
@@ -213,6 +240,7 @@ private fun MainMenu(
     onLiveUpdatesAlwaysOnChange: (Boolean) -> Unit,
     onImport: () -> Unit,
     onExport: () -> Unit,
+    onClearDay: () -> Unit,
     onClear: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -326,6 +354,16 @@ private fun MainMenu(
             borderColor = MaterialTheme.colorScheme.error.copy(alpha = 0.28f),
             containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f),
         ) {
+            ActionRow(
+                icon = Icons.Default.Delete,
+                iconTint = MaterialTheme.colorScheme.error,
+                iconContainer = MaterialTheme.colorScheme.error.copy(alpha = 0.12f),
+                title = stringResource(R.string.cd_clear_day),
+                summary = stringResource(R.string.manage_clear_day_summary),
+                titleColor = MaterialTheme.colorScheme.error,
+                onClick = onClearDay,
+            )
+            GroupDivider()
             ActionRow(
                 icon = Icons.Default.Delete,
                 iconTint = MaterialTheme.colorScheme.error,
@@ -780,6 +818,9 @@ private fun ImportPreviewRow(
 
 @Composable
 private fun ClearConfirmView(
+    title: String,
+    message: String,
+    confirmText: String,
     onBack: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -821,14 +862,14 @@ private fun ClearConfirmView(
         Spacer(Modifier.height(20.dp))
 
         Text(
-            text = stringResource(R.string.clear_all_title),
+            text = title,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            text = stringResource(R.string.clear_all_message),
+            text = message,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -849,7 +890,7 @@ private fun ClearConfirmView(
             shape = RoundedCornerShape(16.dp),
         ) {
             Text(
-                text = stringResource(R.string.clear_all_confirm),
+                text = confirmText,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -881,6 +922,7 @@ private fun MainMenuPreview() {
                 onLiveUpdatesAlwaysOnChange = {},
                 onImport = {},
                 onExport = {},
+                onClearDay = {},
                 onClear = {},
             )
         }
@@ -906,7 +948,13 @@ private fun ImportViewPreview() {
 private fun ClearConfirmPreview() {
     ScheduleTimelineTheme {
         Surface {
-            ClearConfirmView(onBack = {}, onConfirm = {})
+            ClearConfirmView(
+                title = "清空当日日程？",
+                message = "将删除 2026年08月16日 的 3 项日程，其他日期不受影响。此操作无法撤销。",
+                confirmText = "确认清空",
+                onBack = {},
+                onConfirm = {},
+            )
         }
     }
 }

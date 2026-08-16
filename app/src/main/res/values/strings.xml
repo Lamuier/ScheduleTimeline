@@ -90,6 +90,8 @@
     <string name="manage_export_summary">分享当日行程为 CSV 文本</string>
     <string name="manage_danger_zone">危险操作</string>
     <string name="manage_clear_summary">永久删除全部日程与团队候选</string>
+    <string name="cd_clear_day">清空当日日程</string>
+    <string name="manage_clear_day_summary">删除当前查看日期的全部事件，其他日期不受影响</string>
     <string name="import_preview_title">可导入 %1$d 条</string>
     <string name="import_invalid_format">格式错误或时间无效</string>
     <string name="action_parse">解析文本</string>
@@ -102,6 +104,10 @@
     <string name="clear_all_title">清空全部数据？</string>
     <string name="clear_all_message">将永久删除所有日程和团队候选，此操作无法撤销。</string>
     <string name="clear_all_confirm">确认清空</string>
+
+    <string name="clear_day_title">清空当日日程？</string>
+    <string name="clear_day_message">将删除 %1$s 的 %2$d 项日程，其他日期不受影响。此操作无法撤销。</string>
+    <string name="clear_day_confirm">确认清空</string>
 
     <string name="export_share_title">导出当日日程</string>
     <string name="export_empty">当天没有可导出的日程</string>

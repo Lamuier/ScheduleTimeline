@@ -43,6 +43,12 @@ interface ScheduleEventDao {
     @Query("UPDATE schedule_events SET linkedPerformanceId = NULL WHERE linkedPerformanceId = :id")
     suspend fun clearLinkedPerformance(id: Long)
 
+    @Query("UPDATE schedule_events SET linkedPerformanceId = NULL WHERE linkedPerformanceId IN (:ids)")
+    suspend fun clearLinkedPerformances(ids: List<Long>)
+
+    @Query("DELETE FROM schedule_events WHERE dayKey = :dayKey")
+    suspend fun deleteByDay(dayKey: String)
+
     @Query("UPDATE schedule_events SET dayKey = :newKey WHERE dayKey = :oldKey")
     suspend fun reassignDayKey(oldKey: String, newKey: String)
 
