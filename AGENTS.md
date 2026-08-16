@@ -13,14 +13,14 @@
 
 | 项 | 约定 |
 | --- | --- |
-| 语言 | Kotlin 2.0.21 |
+| 语言 | Kotlin 2.3.10（AGP 9 内置 Kotlin，不再应用 `kotlin-android` 插件） |
 | UI | Jetpack Compose + Material Design 3 |
-| 构建 | AGP 8.13.2 / Gradle 8.13 / JDK 17 |
-| SDK | minSdk 26 / targetSdk 36 / compileSdk 36.1 |
+| 构建 | AGP 9.2.1 / Gradle 9.4.1 / JDK 17 |
+| SDK | minSdk 26 / targetSdk 37 / compileSdk 37（Android 17） |
 | ABI | 仅 `arm64-v8a` |
 | Release | R8 混淆 + 资源压缩，签名经环境变量注入 |
 
-Gradle Wrapper 与 Maven 依赖优先使用华为云国内镜像；通过 `distributionSha256Sum` 固定官方 Gradle 8.13 校验值，官方仓库保留为依赖回退源。
+Gradle Wrapper 与 Maven 依赖优先使用华为云国内镜像；通过 `distributionSha256Sum` 固定官方 Gradle 9.4.1 校验值，官方仓库保留为依赖回退源。
 
 ## 架构约定
 

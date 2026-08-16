@@ -95,7 +95,7 @@ abstract class ScheduleDatabase : RoomDatabase() {
                 )
                     .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                     // v1 schema predates categories; wipe only that ancient version
-                    .fallbackToDestructiveMigrationFrom(1)
+                    .fallbackToDestructiveMigrationFrom(true, 1)
                     .build()
                     .also { instance = it }
             }

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Android APK 项目唯一构建入口。
 
@@ -181,11 +181,11 @@ function Resolve-AndroidSdk {
 
     foreach ($candidate in $candidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
-        if (Test-Path -LiteralPath "$candidate\platforms\android-35\android.jar") {
+        if (Test-Path -LiteralPath "$candidate\platforms\android-37.0\android.jar") {
             return $candidate
         }
     }
-    throw "找不到 Android SDK 35。已检查: $($candidates -join '; ')"
+    throw "找不到 Android SDK 37。已检查: $($candidates -join '; ')"
 }
 
 function Get-AppIdentity([string]$Mode = "Release") {
@@ -583,7 +583,7 @@ function Test-ReleaseApk {
     if (($badging | Where-Object { $_ -like "sdkVersion:*" } | Select-Object -First 1) -notmatch "'26'") {
         throw "minSdkVersion 不正确"
     }
-    if (($badging | Where-Object { $_ -like "targetSdkVersion:*" } | Select-Object -First 1) -notmatch "'36'") {
+    if (($badging | Where-Object { $_ -like "targetSdkVersion:*" } | Select-Object -First 1) -notmatch "'37'") {
         throw "targetSdkVersion 不正确"
     }
 

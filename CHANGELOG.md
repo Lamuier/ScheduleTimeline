@@ -15,7 +15,15 @@
 
 ## 未归档
 
+## 1.9.0 - 2026-08-16
+
+### 新增
+- 常驻通知启用 Android 17（API 37）Live Updates 语义颜色：进行中 = 蓝色（INFO）、空档等待下一项 = 绿色（SAFE），作用于进度段与正文语义注解，仅在被提升为 Status Chip / 岛表面时由系统着色；API 36 及以下行为不变
+
 ### 构建
+- 适配 Android 17（API 37）：`compileSdk` / `targetSdk` 升至 37，`buildToolsVersion` 升至 37.0.0（`compileSdk` 改用 AGP 9 新 DSL `release(37)`）
+- 工具链随之升级：AGP 8.13.2 → 9.2.1、Gradle 8.13 → 9.4.1（华为云镜像 + 官方 SHA-256 校验）、Kotlin 2.0.21 → 2.3.10、KSP 2.3.10、Room 2.6.1 → 2.8.4；AGP 9 启用内置 Kotlin，移除 `kotlin-android` 插件并把 `kotlinOptions` 迁移为 `kotlin { compilerOptions }` DSL；`fallbackToDestructiveMigrationFrom` 改用 Room 2.8 新签名（行为不变）
+- `build.ps1` 发布校验同步 API 37：SDK 探测由 `android-35` 改为 `android-37.0`，APK badging 校验 `targetSdkVersion` 由 36 改为 37
 - Debug 使用独立包名 `com.lamuier.scheduletimeline.debug`（`applicationIdSuffix`），与本机 Release 并存；`.\build.ps1 -Install` 不再覆盖正式版。约定写入 `AGENTS.md` / `docs/technical.md`，启动器显示「追程 Debug」
 
 ## 1.8.1 - 2026-08-10

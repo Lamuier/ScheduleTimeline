@@ -47,7 +47,7 @@ ANDROID_RELEASE_KEY_ALIAS
 ANDROID_RELEASE_KEY_PASSWORD
 ```
 
-Gradle Wrapper 与 Maven 依赖优先使用华为云国内镜像；Gradle 8.13 分发包固定官方 SHA-256 校验值，官方仓库保留为依赖回退源。
+Gradle Wrapper 与 Maven 依赖优先使用华为云国内镜像；Gradle 9.4.1 分发包固定官方 SHA-256 校验值，官方仓库保留为依赖回退源。
 
 ### 版本号（X.Y.Z）
 
@@ -87,10 +87,11 @@ versionName = "X.Y.Z"
 
 Kotlin · Jetpack Compose · Material 3 · MVVM（ViewModel + StateFlow + Repository） · Room
 
-- 最低 API 26 · 编译 API 36.1 · 目标 API 36
+- 最低 API 26 · 编译 API 37 · 目标 API 37（Android 17）
 - ABI 仅 `arm64-v8a`
 - 包名 `com.lamuier.scheduletimeline`
-- 固定 `buildToolsVersion = "36.1.0"`（与 compileSdk 36.1 对齐；本机缺 AGP 默认 35.0.0 故显式固定，保证 Release 可复现）
+- 固定 `buildToolsVersion = "37.0.0"`（与 compileSdk 37 对齐，保证 Release 可复现）
+- AGP 9.2.1 / Gradle 9.4.1 / Kotlin 2.3.10（AGP 9 内置 Kotlin，无需 `kotlin-android` 插件；JVM 目标 17）
 
 ## 项目结构
 

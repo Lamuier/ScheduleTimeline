@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
@@ -18,19 +17,19 @@ val releaseSigningConfigured = listOf(
 
 android {
     namespace = "com.lamuier.scheduletimeline"
-    buildToolsVersion = "36.1.0"
+    buildToolsVersion = "37.0.0"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
+        version = release(37) {
+            minorApiLevel = 0
         }
     }
 
     defaultConfig {
         applicationId = "com.lamuier.scheduletimeline"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 17
-        versionName = "1.8.1"
+        targetSdk = 37
+        versionCode = 18
+        versionName = "1.9.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }
@@ -70,8 +69,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        }
     }
 
     buildFeatures {

@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
+import android.text.SpannableStringBuilder
 import androidx.core.content.ContextCompat
 import com.lamuier.scheduletimeline.MainActivity
 import com.lamuier.scheduletimeline.R
@@ -315,6 +316,7 @@ class ScheduleNotificationCoordinator(
         builder.setProgress(durationMs, progressMs, false)
         applyAndroid16LiveUpdate(
             builder = builder,
+            text = text,
             startMillis = startMillis,
             endMillis = endMillis,
             nowMillis = nowMillis,
@@ -395,6 +397,7 @@ class ScheduleNotificationCoordinator(
 
     private fun applyAndroid16LiveUpdate(
         builder: Notification.Builder,
+        text: String,
         startMillis: Long,
         endMillis: Long,
         nowMillis: Long,
@@ -406,9 +409,15 @@ class ScheduleNotificationCoordinator(
 
         val durationMs = max(1, (endMillis - startMillis).toInt())
         val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
+        val segment = Notification.ProgressStyle.Segment(durationMs)
+        // Android 17 语义着色：仅 promoted（灵动岛/常驻表面）生效，不设 setColor
+        // 以免覆盖语义（color 优先级高于 style）。
+        if (Build.VERSION.SDK_INT >= 37) {
+            segment.setSemanticStyle(semanticStyleFor(upcoming))
+        }
         val progressStyle = Notification.ProgressStyle()
             .setProgress(progressMs)
-            .addProgressSegment(Notification.ProgressStyle.Segment(durationMs))
+            .addProgressSegment(segment)
 
         builder.setStyle(progressStyle)
 
@@ -434,7 +443,23 @@ class ScheduleNotificationCoordinator(
                 putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
             })
         }
+
+        // Android 17：contentText 整段语义注解，与进度段同色，
+        // promoted 表面上系统按语义渲染文本颜色。
+        if (Build.VERSION.SDK_INT >= 37) {
+            val annotation = Notification.createSemanticStyleAnnotation(
+                semanticStyleFor(upcoming),
+            )
+            builder.setContentText(SpannableStringBuilder().apply { append(text, annotation, 0) })
+        }
     }
+
+    /**
+     * Android 17 Live Updates 语义颜色：进行中 = INFO（蓝，信息性），
+     * 空档等待下一项 = SAFE（绿，无待办压力）。
+     */
+    private fun semanticStyleFor(upcoming: Boolean): Int =
+        if (upcoming) Notification.SEMANTIC_STYLE_SAFE else Notification.SEMANTIC_STYLE_INFO
 
     private fun scheduleNextBoundary(
         events: List<ScheduleEvent>,

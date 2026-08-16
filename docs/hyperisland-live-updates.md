@@ -37,6 +37,7 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
 - **API 36.1+ 非通话通知提升资格**：须满足主动请求提升、`ongoing`、有标题、非分组摘要、无自定义 `RemoteViews`、允许的通知样式且未请求 colorized；资格成立也不保证系统一定显示 Status Chip，用户或通知渠道设置仍优先。
 - **API 26–35（Android 8–15）**：回退为普通持续通知，仍保留倒计时、进度条和开始/结束边界刷新。
 - **API 13+**：首次开启总通知时请求 `POST_NOTIFICATIONS`；拒绝权限不会伪造通知状态。
+- **API 37（Android 17）语义着色**：常驻通知按状态启用 Live Updates 语义颜色——进行中 = `SEMANTIC_STYLE_INFO`（蓝，信息性），空档等待下一项 = `SEMANTIC_STYLE_SAFE`（绿）。作用于 `ProgressStyle.Segment.setSemanticStyle()` 与 `contentText` 的语义注解，仅在通知被 promoted（Status Chip / 岛表面）时由系统渲染；不调用 `setColor()`，因 color 会覆盖 semanticStyle。
 
 ### 2.2 Xiaomi HyperOS OS3
 
