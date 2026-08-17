@@ -101,11 +101,12 @@ private enum class ManageStep { Menu, Import, ClearConfirm, ClearDayConfirm }
 fun ManageDataSheet(
     viewModel: ScheduleViewModel,
     onRequestNotificationPermission: (Boolean) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    openAtImport: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var currentStep by remember { mutableStateOf(ManageStep.Menu) }
+    var currentStep by remember { mutableStateOf(if (openAtImport) ManageStep.Import else ManageStep.Menu) }
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
     val liveUpdatesAlwaysOn by viewModel.liveUpdatesAlwaysOn.collectAsStateWithLifecycle()

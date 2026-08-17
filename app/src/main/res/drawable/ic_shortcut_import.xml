@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App Shortcut 图标：批量导入（托盘 + 下行箭头，CSV 批量导入日程）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M19,3h-1V1h-2v2H8V1H6v2H5c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2zM19,21H5V8h14v13z" />
+    <path
+        android:fillColor="#1B1B1F"
+        android:pathData="M12,17l4,-4h-2.5V9.5h-3V13H8z" />
+</vector>

@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
@@ -686,6 +687,34 @@ internal fun EventDetailSheet(
                     )
                 }
 
+                // 用户备注：中性样式展示，与冲突警告区分。
+                item.note?.let { note ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                // 仅真实时间冲突才显示警告感叹号。
                 item.overlapNotes.forEach { note ->
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
@@ -772,6 +801,7 @@ private fun EventDetailSheetPreview() {
                     endMinutes = 16 * 60,
                     dayKey = "2026-07-12",
                 ),
+                note = "记得携带会员卡与特典券",
                 overlapNotes = listOf("与StarCandy特典重叠"),
             ),
             events = emptyList(),

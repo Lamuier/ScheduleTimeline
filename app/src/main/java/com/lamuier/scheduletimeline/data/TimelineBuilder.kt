@@ -6,6 +6,8 @@ sealed class TimelineItem {
 
     data class Event(
         val event: ScheduleEvent,
+        /** 用户手动填写的备注，独立于自动冲突提示展示。 */
+        val note: String? = null,
         val overlapNotes: List<String> = emptyList(),
     ) : TimelineItem() {
         override val startMinutes: Int get() = event.startMinutes
@@ -77,6 +79,7 @@ object TimelineBuilder {
             val eventItems = eventsInCluster.map { event ->
                 TimelineItem.Event(
                     event = event,
+                    note = event.note.takeIf { it.isNotBlank() },
                     overlapNotes = overlapNotesFor(event, sorted),
                 )
             }
@@ -125,22 +128,15 @@ object TimelineBuilder {
         }
     }
 
+    /** 仅自动生成的时间冲突提示；用户备注走 [TimelineItem.Event.note] 单独展示。 */
     private fun overlapNotesFor(
         event: ScheduleEvent,
         all: List<ScheduleEvent>,
     ): List<String> {
-        val auto = all
+        return all
             .filter { it.id != event.id && overlaps(event, it) }
             .map { "与${displayLabel(it)}重叠" }
             .distinct()
-        val manual = event.note.takeIf { it.isNotBlank() }
-        return buildList {
-            if (manual != null) add(manual)
-            auto.forEach { candidate ->
-                val key = candidate.removePrefix("与").removeSuffix("重叠")
-                if (manual == null || !manual.contains(key)) add(candidate)
-            }
-        }.distinct()
     }
 
     private fun overlaps(a: ScheduleEvent, b: ScheduleEvent): Boolean {

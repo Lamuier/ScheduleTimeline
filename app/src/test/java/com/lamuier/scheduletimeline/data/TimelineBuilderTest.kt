@@ -67,12 +67,45 @@ class TimelineBuilderTest {
         assertTrue(TimelineBuilder.build(emptyList()).isEmpty())
     }
 
+    @Test
+    fun build_separatesManualNoteFromOverlapNotes() {
+        val events = listOf(
+            event(1, "A", start = 600, end = 700, note = "记得带会员卡"),
+            event(2, "B", start = 720, end = 780),
+        )
+
+        val first = TimelineBuilder.build(events)
+            .filterIsInstance<TimelineItem.Event>()
+            .single { it.event.id == 1L }
+
+        assertEquals("记得带会员卡", first.note)
+        assertTrue(first.overlapNotes.isEmpty())
+    }
+
+    @Test
+    fun build_overlapWarningNotSuppressedByNoteText() {
+        val events = listOf(
+            event(1, "A", start = 600, end = 700, note = "与B重叠，注意时间"),
+            event(2, "B", start = 650, end = 750, eventType = EventType.TOKUTEN),
+        )
+
+        val first = TimelineBuilder.build(events)
+            .filterIsInstance<TimelineItem.OverlapGroup>()
+            .single()
+            .events
+            .single { it.event.id == 1L }
+
+        assertEquals("与B重叠，注意时间", first.note)
+        assertTrue(first.overlapNotes.any { it.contains("重叠") })
+    }
+
     private fun event(
         id: Long,
         title: String,
         start: Int,
         end: Int,
         eventType: EventType = EventType.PERFORMANCE,
+        note: String = "",
     ) = ScheduleEvent(
         id = id,
         team = title,
@@ -81,5 +114,6 @@ class TimelineBuilderTest {
         endMinutes = end,
         eventType = eventType.storage,
         dayKey = "2026-07-12",
+        note = note,
     )
 }

@@ -39,13 +39,25 @@ fun TimelineScreen(
     onAdd: () -> Unit,
     onEditEvent: (Long) -> Unit,
     onRequestNotificationPermission: (Boolean) -> Unit,
+    requestOpenImport: Boolean = false,
+    onOpenImportConsumed: () -> Unit = {},
 ) {
     val dayState by viewModel.dayState.collectAsStateWithLifecycle()
     val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
+    // shortcut 直达导入：面板打开时是否停在导入步骤，关闭后复位
+    var manageOpenAtImport by remember { mutableStateOf(false) }
     var selectedEvent by remember { mutableStateOf<TimelineItem.Event?>(null) }
+
+    LaunchedEffect(requestOpenImport) {
+        if (requestOpenImport) {
+            showManageSheet = true
+            manageOpenAtImport = true
+            onOpenImportConsumed()
+        }
+    }
     val isToday = currentDate == LocalDate.now()
     var nearestHint by remember { mutableStateOf<NearestScheduleHint?>(null) }
     LaunchedEffect(dayState.date, dayState.events.isEmpty()) {
@@ -235,7 +247,11 @@ fun TimelineScreen(
         ManageDataSheet(
             viewModel = viewModel,
             onRequestNotificationPermission = onRequestNotificationPermission,
-            onDismiss = { showManageSheet = false },
+            onDismiss = {
+                showManageSheet = false
+                manageOpenAtImport = false
+            },
+            openAtImport = manageOpenAtImport,
         )
     }
 

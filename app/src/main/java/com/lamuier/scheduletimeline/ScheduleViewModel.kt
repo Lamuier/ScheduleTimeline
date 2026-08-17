@@ -124,6 +124,20 @@ class ScheduleViewModel(
         _currentDate.value = _currentDate.value.plusDays(days)
     }
 
+    /**
+     * 跳到今天（含）起未来最近一个有日程的日期；无未来日程则停在今天。
+     * 供桌面 Shortcut「最近日程」使用。
+     */
+    fun jumpToNextScheduledDate() {
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            val nextKey = repository.firstDayKeyOnOrAfter(
+                today.format(DateTimeFormatter.ISO_LOCAL_DATE),
+            )
+            _currentDate.value = nextKey?.let(LocalDate::parse) ?: today
+        }
+    }
+
     fun setThemeMode(mode: ThemeMode) {
         themePreferences.setMode(mode)
     }

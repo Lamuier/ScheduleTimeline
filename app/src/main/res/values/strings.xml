@@ -155,4 +155,14 @@
     <string name="widget_upcoming_later">%1$s %2$s 开始</string>
     <string name="widget_small_description">查看当前进行中或下一项日程</string>
     <string name="widget_large_description">展示今日全部日程</string>
+
+    <!-- 长按桌面图标的 App Shortcuts -->
+    <string name="shortcut_add_short">新增日程</string>
+    <string name="shortcut_add_long">新增今日日程</string>
+    <string name="shortcut_today_short">今日日程</string>
+    <string name="shortcut_today_long">查看今日日程</string>
+    <string name="shortcut_next_short">最近日程</string>
+    <string name="shortcut_next_long">查看未来最近日程</string>
+    <string name="shortcut_import_short">批量导入</string>
+    <string name="shortcut_import_long">批量导入 CSV 日程</string>
 </resources>

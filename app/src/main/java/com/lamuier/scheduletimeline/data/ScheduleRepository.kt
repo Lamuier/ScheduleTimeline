@@ -98,6 +98,10 @@ class ScheduleRepository(
 
     suspend fun distinctDayKeys(): List<String> = eventDao.distinctDayKeys()
 
+    /** 从指定日期（含当日）起第一个有日程的 dayKey；无则 null。 */
+    suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String? =
+        eventDao.firstDayKeyOnOrAfter(fromDayKey)
+
     /** 仅做 dayKey 遗留迁移；不写入样例日程。 */
     suspend fun seedIfEmpty() {
         val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)

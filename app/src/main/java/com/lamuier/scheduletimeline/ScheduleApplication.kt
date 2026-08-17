@@ -34,6 +34,7 @@ class ScheduleApplication : Application() {
             repository = repository,
             preferences = notificationPreferences,
         )
+        AppShortcuts.register(this)
         refreshNotifications()
     }
 

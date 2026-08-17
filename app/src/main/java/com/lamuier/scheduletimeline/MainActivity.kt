@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Build
+import java.time.LocalDate
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -32,9 +33,17 @@ class MainActivity : ComponentActivity() {
     // 桌面小组件深链：点击日程项直接打开对应事件编辑页（冷启动 / 热启动均生效）
     private val widgetEventId = mutableStateOf<Long?>(null)
 
+    // 桌面 Shortcut（长按图标）：待处理动作，Compose 侧消费后清空
+    private val pendingShortcutAction = mutableStateOf<String?>(null)
+
+    // 批量导入 Shortcut：直达主屏管理面板的导入步骤
+    private val requestOpenImport = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleWidgetIntent(intent)
+        // 仅真实冷启动处理，防止旋转等重建时重放已消费的 shortcut intent
+        if (savedInstanceState == null) handleShortcutIntent(intent)
         enableEdgeToEdge()
         setContent {
             val viewModel: ScheduleViewModel = viewModel(
@@ -64,15 +73,36 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // 桌面 Shortcut：新增日程 / 今日日程 / 最近日程
+                val shortcutAction by pendingShortcutAction
+                LaunchedEffect(shortcutAction) {
+                    when (shortcutAction) {
+                        AppShortcuts.ACTION_ADD_EVENT -> {
+                            // 固定为今天新增，避免沿用上次停留的非今日日期
+                            viewModel.changeDate(LocalDate.now())
+                            navController.navigate("edit")
+                        }
+                        AppShortcuts.ACTION_TODAY -> viewModel.changeDate(LocalDate.now())
+                        AppShortcuts.ACTION_NEXT_SCHEDULED ->
+                            viewModel.jumpToNextScheduledDate()
+                        // 导入面板在主屏内部，走独立信号由 TimelineScreen 消费
+                        AppShortcuts.ACTION_IMPORT -> requestOpenImport.value = true
+                    }
+                    if (shortcutAction != null) pendingShortcutAction.value = null
+                }
+
                 NavHost(
                     navController = navController,
                     startDestination = "timeline",
                 ) {
                     composable("timeline") {
+                        val importRequest by requestOpenImport
                         TimelineScreen(
                             viewModel = viewModel,
                             onAdd = { navController.navigate("edit") },
                             onEditEvent = { id -> navController.navigate("edit/$id") },
+                            requestOpenImport = importRequest,
+                            onOpenImportConsumed = { requestOpenImport.value = false },
                             onRequestNotificationPermission = { alwaysOn ->
                                 pendingAlwaysOn = alwaysOn
                                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -121,6 +151,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWidgetIntent(intent)
+        handleShortcutIntent(intent)
     }
 
     private fun handleWidgetIntent(intent: Intent?) {
@@ -129,5 +160,15 @@ class MainActivity : ComponentActivity() {
             -1L,
         ) ?: -1L
         if (id != -1L) widgetEventId.value = id
+    }
+
+    private fun handleShortcutIntent(intent: Intent?) {
+        when (intent?.action) {
+            AppShortcuts.ACTION_ADD_EVENT,
+            AppShortcuts.ACTION_TODAY,
+            AppShortcuts.ACTION_NEXT_SCHEDULED,
+            AppShortcuts.ACTION_IMPORT,
+                -> pendingShortcutAction.value = intent.action
+        }
     }
 }

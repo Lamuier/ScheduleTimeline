@@ -15,6 +15,17 @@
 
 ## 未归档
 
+## 1.11.0 - 2026-08-17
+
+### 新增
+- 桌面快捷方式（App Shortcuts）：长按图标提供「新增日程」（固定为今天新增并直达编辑页）、「今日日程」（一键回到今天）、「最近日程」（跳到今天含起未来最近有日程的日期）、「批量导入」（直达管理面板 CSV 导入步骤）；`MainActivity` 改为 `singleTask` 以保证热启动走 `onNewIntent` 正确路由
+
+### 变更
+- 事件详情页备注与冲突提示分离展示：用户备注改为中性样式（Info 图标 + `surfaceVariant` 底），感叹号警告样式仅用于真实时间重叠的自动提示；即使备注文本提及冲突也不再抑制警告条
+
+### 修复
+- Shortcut 点击无响应：静态 `shortcuts.xml` 的 `<intent>` 省略 `targetPackage` 在部分启动器上解析失败，且无法同时兼容 Debug（`.debug` 后缀）与 Release 包名；改为 `AppShortcuts` 进程启动时动态注册 Dynamic Shortcuts（显式 intent），并在旋转重建时不重放已消费的 shortcut intent
+
 ## 1.10.0 - 2026-08-16
 
 ### 新增
