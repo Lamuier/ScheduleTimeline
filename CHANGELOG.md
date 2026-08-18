@@ -15,7 +15,18 @@
 
 ## 未归档
 
+## 1.11.2 - 2026-08-18（灰度测试，验证后转正）
+
+### 修复
+- 常驻通知锁屏隐私补齐：`postLiveUpdate` 由 `VISIBILITY_PUBLIC` 改为 `VISIBILITY_PRIVATE` 并提供 `setPublicVersion` 脱敏公开版（仅应用名 +「日程进行中 / 日程即将开始」状态概要），锁屏不再暴露团队名、时间与下一项行程；解锁表面（含灵动岛 / Live Updates）展示不受影响
+
+### 文档
+- 新增 `PRIVACY.md` 隐私政策（纯本地存储、权限用途、锁屏脱敏、导出行为、备份排除），可供应用市场审核引用
+- 新增 `THIRD_PARTY_NOTICES.md` 第三方组件许可证声明（运行时依赖均 Apache 2.0；测试 / 构建期依赖单列），作为 packaging 去重 LICENSE/NOTICE 文本后的集中声明
+- README 文档表补充以上两份文档入口
+
 ### 构建
+- 开源协作可用性：补齐 Unix `gradlew` 脚本（LF 入库、git 可执行位 `100755`），Linux/macOS 贡献者克隆后可直接 `./gradlew` 构建；`gradlew.bat` 与 `gradle-wrapper.jar` 经 `gradle wrapper` 任务同步再生成（9.4.1 官方模板），华为云镜像 `distributionUrl` 与 `distributionSha256Sum` 校验保持不变
 - APK 体积优化：1.68 MB → 1.33 MB（约 -21%）
   - `androidResources.localeFilters` 仅保留中英文资源（与 `locales_config.xml` 声明一致），`resources.arsc` 由 335 KB 降至 28 KB
   - 删除 5 密度 × 2 的 legacy PNG 启动图标；minSdk 26 下 `mipmap-anydpi-v26` 自适应图标在全部设备恒生效，PNG 属死重量

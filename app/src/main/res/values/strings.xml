@@ -74,6 +74,8 @@
     <string name="notification_live_next_suffix">｜下一项：%1$s %2$s</string>
     <string name="notification_live_upcoming_content">%1$s · %2$s %3$s 开始</string>
     <string name="notification_short_text">进行中</string>
+    <string name="notification_public_live_active">日程进行中</string>
+    <string name="notification_public_live_upcoming">日程即将开始</string>
     <string name="notification_island_suffix_opening">后开场</string>
     <string name="notification_island_suffix_started">已开场</string>
     <string name="notification_island_multi_title">%1$d 项日程</string>

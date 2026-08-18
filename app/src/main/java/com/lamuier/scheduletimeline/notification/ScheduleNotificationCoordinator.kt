@@ -299,7 +299,10 @@ class ScheduleNotificationCoordinator(
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_EVENT)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            // 行程属敏感个人信息：锁屏隐藏团队名与时间等详情，仅显示脱敏公开版
+            // （应用名 + 状态概要）；灵动岛 / Live Updates 在解锁表面不受影响。
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(buildPublicVersion(upcoming))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(true)
@@ -340,6 +343,24 @@ class ScheduleNotificationCoordinator(
         )
         runCatching { notificationManager.notify(LIVE_NOTIFICATION_ID, notification) }
     }
+
+    /**
+     * 锁屏脱敏公开版：仅应用名 + 状态概要，不含团队、标题、时间等行程细节。
+     */
+    private fun buildPublicVersion(upcoming: Boolean): Notification =
+        Notification.Builder(appContext, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(appContext.getString(R.string.app_name))
+            .setContentText(
+                appContext.getString(
+                    if (upcoming) {
+                        R.string.notification_public_live_upcoming
+                    } else {
+                        R.string.notification_public_live_active
+                    },
+                ),
+            )
+            .build()
 
     /**
      * Compact capsule/chip label for a far-future upcoming event. Within the

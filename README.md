@@ -61,6 +61,8 @@
 | [docs/UI-design.md](docs/UI-design.md) | 色彩、字体、间距、组件与时间轴视觉约定 |
 | [docs/hyperisland-live-updates.md](docs/hyperisland-live-updates.md) | Live Updates 与小米超级岛适配说明 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本更新记录 |
+| [PRIVACY.md](PRIVACY.md) | 隐私政策（纯本地存储、无收集） |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方开源组件与许可证声明 |
 
 ## 许可证
 
