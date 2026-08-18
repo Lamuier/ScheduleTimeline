@@ -152,7 +152,8 @@ class ScheduleNotificationCoordinator(
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_REMINDER)
-            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            // 行程属敏感个人信息：锁屏隐藏详情，仅显示应用名
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setAutoCancel(true)
             .setShowWhen(true)
             .setWhen(System.currentTimeMillis())

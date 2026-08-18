@@ -51,6 +51,70 @@ class ScheduleExportTest {
     }
 
     @Test
+    fun toCsv_quotesFieldsContainingCommaOrQuote() {
+        val event = ScheduleEvent(
+            id = 1,
+            team = "StarDiary",
+            eventType = EventType.PERFORMANCE.storage,
+            title = "开场",
+            location = "A厅, B区",
+            startMinutes = 14 * 60 + 20,
+            endMinutes = 14 * 60 + 40,
+            note = "带\"引号\"",
+            dayKey = "2026-07-12",
+        )
+        val csv = ScheduleExport.toCsv(listOf(event))
+        assertTrue(
+            csv.contains("2026-07-12, StarDiary, 演出, , 开场, \"A厅, B区\", 14:20, 14:40, \"带\"\"引号\"\"\""),
+        )
+    }
+
+    @Test
+    fun parseImport_roundTripsQuotedFieldsWithCommaQuoteAndNewline() {
+        val original = ScheduleEvent(
+            id = 1,
+            team = "StarDiary",
+            eventType = EventType.PERFORMANCE.storage,
+            title = "开场, 特别场",
+            location = "A厅, B区",
+            startMinutes = 14 * 60 + 20,
+            endMinutes = 14 * 60 + 40,
+            note = "带\"引号\"、逗号，和\n换行",
+            dayKey = "2026-07-12",
+        )
+        val csv = ScheduleExport.toCsv(listOf(original))
+        val events = ScheduleExport.parseImportDrafts(csv, fallbackDayKey = "2026-07-12")
+            .map { it.event }
+
+        assertEquals(1, events.size)
+        assertEquals("开场, 特别场", events[0].title)
+        assertEquals("A厅, B区", events[0].location)
+        assertEquals("带\"引号\"、逗号，和\n换行", events[0].note)
+        assertEquals("2026-07-12", events[0].dayKey)
+    }
+
+    @Test
+    fun parseImport_keepsMidFieldQuoteOfLegacyUnquotedRows() {
+        // 历史导出无引号转义：字段中部的半角引号应按字面保留，不触发引号段
+        val events = ScheduleExport.parseImport(
+            "2026-06-01, StarDiary, 演出, , , 主舞台, 14:00, 15:00, 他说\"好\"",
+        )
+        assertEquals(1, events.size)
+        assertEquals("他说\"好\"", events[0].note)
+    }
+
+    @Test
+    fun parseImport_acceptsQuotedFieldsInHandEditedCsv() {
+        val events = ScheduleExport.parseImport(
+            "2026-06-01, \"Team, A\", 特典, 平特, \"备注\"\"x\"\"\", \"地点1, 地点2\", 14:00, 15:00, 备注",
+        )
+        assertEquals(1, events.size)
+        assertEquals(listOf("Team, A"), events[0].teamNames)
+        assertEquals("备注\"x\"", events[0].title)
+        assertEquals("地点1, 地点2", events[0].location)
+    }
+
+    @Test
     fun parseImport_acceptsOldTenColumnFormatAndIgnoresManualLink() {
         val drafts = ScheduleExport.parseImportDrafts(
             "2026-06-01, StarDiary, 特典, 平特, , 吧台A, 17:00, 19:00, , 14:20",

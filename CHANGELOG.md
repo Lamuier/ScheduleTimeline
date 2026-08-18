@@ -15,6 +15,18 @@
 
 ## 未归档
 
+## 1.11.1 - 2026-08-18
+
+### 变更
+- 数据提取规则纵深加固：`data_extraction_rules.xml` 云备份与设备迁移均追加排除 `database` domain，Room 数据库（行程数据）不参与 Android 12+ 备份/迁移
+
+### 修复
+- CSV 导出/导入支持 RFC 4180 引号转义：字段含逗号 / 引号 / 换行时导出端自动加引号（内部引号翻倍），导入端改为引号感知解析，杜绝含逗号字段导致的列错位与数据丢失；历史无引号导出仍可正常导入（字段中部半角引号按字面保留）
+- 通知锁屏隐私加固：常驻通知与关键时间点提醒由 `VISIBILITY_PUBLIC` 改为 `VISIBILITY_PRIVATE`，锁屏不再直接展示行程明细（团队、地点、时间），仅显示应用名
+
+### 构建
+- 收窄 Release 混淆保留规则：由整个 `data` 包收窄为仅 Room 实体（`ScheduleEvent` / `Category`）；`TimelineBuilder` / `ScheduleExport` / `ScheduleRepository` / `TeamNames` 等纯 Kotlin 类恢复 R8 混淆与内联优化（已验证 `ScheduleDatabase_Impl` 反射关键类保持原名），APK 1.71 MB → 1.68 MB
+
 ## 1.11.0 - 2026-08-17
 
 ### 新增
