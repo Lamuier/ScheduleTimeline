@@ -24,6 +24,7 @@ ehthumbs.db
 local.properties
 *.local
 *.local.*
+AGENTS.md
 
 # ---- Secrets & signing (security) ----
 *.jks
