@@ -16,6 +16,10 @@
 ## 未归档
 
 ### 构建
+- APK 体积优化：1.68 MB → 1.33 MB（约 -21%）
+  - `androidResources.localeFilters` 仅保留中英文资源（与 `locales_config.xml` 声明一致），`resources.arsc` 由 335 KB 降至 28 KB
+  - 删除 5 密度 × 2 的 legacy PNG 启动图标；minSdk 26 下 `mipmap-anydpi-v26` 自适应图标在全部设备恒生效，PNG 属死重量
+  - packaging 排除依赖库嵌套的重复 `META-INF/**/LICENSE.txt` / `NOTICE.txt`（15 KB → 0.7 KB，仅保留 .version 与 services）
 - `build.ps1 -Release` 打包成功后自动清理 `dist/` 中旧版本产物，仅保留本次版本文件（apk / mapping / sha256 / build.json）；构建失败不动旧版本
 
 ## 1.11.1 - 2026-08-18

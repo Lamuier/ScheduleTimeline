@@ -79,6 +79,18 @@ android {
         compose = true
         buildConfig = true
     }
+
+    androidResources {
+        // 与 locales_config.xml 声明一致：仅保留中英文，裁掉依赖库携带的 80+ 种语言翻译
+        localeFilters += listOf("zh", "en")
+    }
+
+    packaging {
+        resources {
+            // 各依赖构件嵌套的重复许可文本（AndroidX 携带多份相同 Apache 2.0 文案）
+            excludes += setOf("META-INF/**/LICENSE.txt", "META-INF/**/NOTICE.txt")
+        }
+    }
 }
 
 ksp {
