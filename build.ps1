@@ -788,6 +788,23 @@ function Invoke-ReleasePackage {
             builtAt = (Get-Date).ToString("o")
         } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dist "$artifactBaseName-build.json") -Encoding utf8
 
+        # dist/ 只保留本次版本产物；打包成功后才清理，失败不动旧版本
+        $staleFiles = @(
+            Get-ChildItem -LiteralPath $dist -File -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.Name -like "$($identity.RootName)-v*" -and
+                    $_.Name -notlike "$artifactBaseName-*"
+                }
+        )
+        foreach ($stale in $staleFiles) {
+            Remove-Item -LiteralPath $stale.FullName -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path -LiteralPath $stale.FullName)) {
+                Write-Host "  已清理旧产物: $($stale.Name)" -ForegroundColor DarkGray
+            } else {
+                Write-Host "  旧产物清理失败（被占用）: $($stale.Name)" -ForegroundColor Yellow
+            }
+        }
+
         Write-Host ""
         Write-Host "打包完成" -ForegroundColor Green
         Write-Host "  APK     : $destination"
