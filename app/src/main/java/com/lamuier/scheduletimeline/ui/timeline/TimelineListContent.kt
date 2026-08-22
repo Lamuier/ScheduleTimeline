@@ -108,7 +108,7 @@ internal fun TimelineList(
     var lastCenteredKey by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().clipToBounds()) {
         // 有「现在」落点时上下各留半屏空白，才能把时间线滚到视口正中（含当天第一条/最后一条）。
         val extraPad = if (nowItemKey != null) maxHeight / 2 else 8.dp
         val bottomPad = extraPad.coerceAtLeast(80.dp)
@@ -173,11 +173,14 @@ internal fun TimelineList(
                 }
             }
 
-            // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示，
-            // 位置直接由 LazyListState 的可见 item 信息插值得到，随滚动与当前时间实时更新。
+            // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示。
+            // 只在列表视口内绘制：item 部分滚出时插值 y 可能为负，Compose 默认不裁剪，
+            // 会盖住上方的状态条 / 统计条（Column 后绘制的子项图层更高）。
             if (nowMinutes != null) {
                 val nowY = computeNowY(listState, items, nowMinutes, cardBottomPadPx)
-                if (nowY != null) {
+                val viewportH = listState.layoutInfo.viewportEndOffset -
+                    listState.layoutInfo.viewportStartOffset
+                if (nowY != null && viewportH > 0 && nowY in 0f..viewportH.toFloat()) {
                     NowLine(y = nowY)
                 }
             }
