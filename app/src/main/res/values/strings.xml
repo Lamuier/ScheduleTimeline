@@ -23,6 +23,8 @@
     <string name="action_export">导出当日 CSV</string>
     <string name="action_clear_all">清空全部数据</string>
     <string name="action_back_to_today">返回今天</string>
+    <string name="action_jump_to_now">当前时间</string>
+    <string name="cd_jump_to_now">跳到当前时间轴</string>
 
     <string name="stats_events">日程</string>
     <string name="stats_busy">忙碌</string>

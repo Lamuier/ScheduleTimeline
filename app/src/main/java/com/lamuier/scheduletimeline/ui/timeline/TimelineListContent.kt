@@ -34,12 +34,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -49,9 +52,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -83,6 +88,7 @@ import com.lamuier.scheduletimeline.ui.theme.adaptTo
 import com.lamuier.scheduletimeline.ui.theme.eventTypeColors
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
@@ -100,6 +106,7 @@ internal fun TimelineList(
         nowMinutes?.let { now -> nowContainingItemKey(items, now) }
     }
     var lastCenteredKey by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         // 有「现在」落点时上下各留半屏空白，才能把时间线滚到视口正中（含当天第一条/最后一条）。
@@ -112,6 +119,17 @@ internal fun TimelineList(
             if (now == null || nowItemKey == null || nowItemKey == lastCenteredKey) return@LaunchedEffect
             centerNowLine(listState, items, now, cardBottomPadPx)
             lastCenteredKey = nowItemKey
+        }
+
+        val jumpDirection by remember(items, nowMinutes, nowItemKey, cardBottomPadPx) {
+            derivedStateOf {
+                val now = nowMinutes
+                if (now == null || nowItemKey == null || items.isEmpty()) {
+                    null
+                } else {
+                    nowJumpDirection(listState, items, now, cardBottomPadPx)
+                }
+            }
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
@@ -163,6 +181,37 @@ internal fun TimelineList(
                     NowLine(y = nowY)
                 }
             }
+
+            // 当天有日程、当前时间轴滚出视野时，左下角一键跳回并居中。
+            // 非今天页 nowMinutes 为 null，此按钮不出现，避免与「返回今天」抢位。
+            val direction = jumpDirection
+            if (direction != null) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        val now = nowMinutes ?: return@ExtendedFloatingActionButton
+                        scope.launch {
+                            centerNowLine(listState, items, now, cardBottomPadPx)
+                            lastCenteredKey = nowItemKey
+                        }
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (direction == NowJumpDirection.Up) {
+                                Icons.Default.KeyboardArrowUp
+                            } else {
+                                Icons.Default.KeyboardArrowDown
+                            },
+                            contentDescription = stringResource(R.string.cd_jump_to_now),
+                        )
+                    },
+                    text = { Text(stringResource(R.string.action_jump_to_now)) },
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp),
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
         }
     }
 }
@@ -210,6 +259,33 @@ private suspend fun centerNowLine(
     val delta = nowY - viewport / 2f
     if (abs(delta) < 4f) return
     listState.scrollBy(delta)
+}
+
+private enum class NowJumpDirection { Up, Down }
+
+/**
+ * 当前时间轴是否在视口内。在视口内返回 null（不必显示跳转按钮）；
+ * 滚出视野时返回应提示的方向。布局尚未就绪时不显示按钮。
+ */
+private fun nowJumpDirection(
+    listState: LazyListState,
+    items: List<TimelineItem>,
+    now: Int,
+    bottomPadPx: Int,
+): NowJumpDirection? {
+    val visible = listState.layoutInfo.visibleItemsInfo
+    if (visible.isEmpty()) return null
+    val viewport = listState.layoutInfo.viewportEndOffset -
+        listState.layoutInfo.viewportStartOffset
+    val nowY = computeNowY(listState, items, now, bottomPadPx)
+    if (viewport > 0 && nowY != null && nowY >= 0f && nowY <= viewport) return null
+
+    val index = items.indices.firstOrNull { i ->
+        val (start, end) = itemTimeRange(items[i])
+        now in start until end
+    } ?: return null
+    if (nowY != null) return if (nowY < 0f) NowJumpDirection.Up else NowJumpDirection.Down
+    return if (index < visible.first().index) NowJumpDirection.Up else NowJumpDirection.Down
 }
 
 /**
