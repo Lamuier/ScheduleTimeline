@@ -14,6 +14,7 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
         val action = intent?.action
         if (action != ScheduleNotificationCoordinator.ACTION_REFRESH &&
             action != ScheduleNotificationCoordinator.ACTION_REMINDER &&
+            action != ScheduleNotificationCoordinator.ACTION_COMPLETE &&
             action != Intent.ACTION_BOOT_COMPLETED &&
             action != Intent.ACTION_MY_PACKAGE_REPLACED
         ) return
@@ -22,10 +23,12 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
         val application = context.applicationContext as ScheduleApplication
         CoroutineScope(Dispatchers.IO).launch {
             runCatching {
-                if (action == ScheduleNotificationCoordinator.ACTION_REMINDER) {
-                    application.notificationCoordinator.handleReminder(intent)
-                } else {
-                    application.notificationCoordinator.refresh()
+                when (action) {
+                    ScheduleNotificationCoordinator.ACTION_REMINDER ->
+                        application.notificationCoordinator.handleReminder(intent)
+                    ScheduleNotificationCoordinator.ACTION_COMPLETE ->
+                        application.notificationCoordinator.handleComplete(intent)
+                    else -> application.notificationCoordinator.refresh()
                 }
             }
             // 通知刷新后同步桌面小组件

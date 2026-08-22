@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ScheduleEvent::class, Category::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class ScheduleDatabase : RoomDatabase() {
@@ -86,6 +86,15 @@ abstract class ScheduleDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `schedule_events` ADD COLUMN `completed` " +
+                        "INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         fun get(context: Context): ScheduleDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -93,7 +102,7 @@ abstract class ScheduleDatabase : RoomDatabase() {
                     ScheduleDatabase::class.java,
                     "schedule_timeline.db",
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     // v1 schema predates categories; wipe only that ancient version
                     .fallbackToDestructiveMigrationFrom(true, 1)
                     .build()

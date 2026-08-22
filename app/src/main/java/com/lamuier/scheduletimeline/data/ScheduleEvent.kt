@@ -33,4 +33,9 @@ data class ScheduleEvent(
     val tokutenKind: String = "",
     /** 遗留关联字段；新逻辑按同日团队名称自动关联，新写入恒为 null。 */
     val linkedPerformanceId: Long? = null,
+    /**
+     * 特典可提前标记完成：完成后不再作为进行中/待办进入通知提醒，
+     * 时间轴也不再视为当前进行中。演出恒为 false。
+     */
+    val completed: Boolean = false,
 )

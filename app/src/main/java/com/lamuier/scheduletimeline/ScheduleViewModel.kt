@@ -305,6 +305,7 @@ class ScheduleViewModel(
             return
         }
         viewModelScope.launch {
+            val existing = state.loadedId.takeIf { it != 0L }?.let { repository.get(it) }
             repository.save(
                 ScheduleEvent(
                     id = state.loadedId,
@@ -323,6 +324,8 @@ class ScheduleViewModel(
                     endMinutes = state.endMinutes,
                     note = state.note.trim(),
                     dayKey = currentDayKey(),
+                    completed = state.eventType == EventType.TOKUTEN &&
+                        (existing?.completed == true),
                 ),
             )
             refreshNotifications()
@@ -333,6 +336,15 @@ class ScheduleViewModel(
     fun delete(id: Long, onDone: () -> Unit = {}) {
         viewModelScope.launch {
             repository.delete(id)
+            refreshNotifications()
+            onDone()
+        }
+    }
+
+    /** 标记特典已完成：通知不再提醒该日程。 */
+    fun completeTokuten(id: Long, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.setTokutenCompleted(id, completed = true)
             refreshNotifications()
             onDone()
         }

@@ -24,6 +24,7 @@ import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.TimeFormat
 import com.lamuier.scheduletimeline.data.TimelineBuilder
 import com.lamuier.scheduletimeline.data.TimelineItem
+import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.teamDisplay
 import kotlinx.coroutines.delay
 import java.time.Instant
@@ -264,6 +265,14 @@ fun TimelineScreen(
                 selectedEvent = null
                 onEditEvent(id)
             },
+            onCompleteTokuten = {
+                val id = event.event.id
+                selectedEvent = null
+                viewModel.completeTokuten(id)
+            }.takeIf {
+                EventType.fromStorage(event.event.eventType) == EventType.TOKUTEN &&
+                    !event.event.completed
+            },
             onDismiss = { selectedEvent = null },
         )
     }
@@ -332,11 +341,13 @@ private fun CurrentStatusBanner(items: List<TimelineItem>, nowMinutes: Int) {
             is TimelineItem.Gap -> emptyList()
         }
     }
-    val currentEvents = eventItems.filter { nowMinutes in it.startMinutes until it.endMinutes }
+    val currentEvents = eventItems.filter {
+        !it.event.completed && nowMinutes in it.startMinutes until it.endMinutes
+    }
     val currentGap = items.filterIsInstance<TimelineItem.Gap>()
         .find { nowMinutes in it.startMinutes until it.endMinutes }
     val nextEvent = eventItems
-        .filter { it.startMinutes > nowMinutes }
+        .filter { !it.event.completed && it.startMinutes > nowMinutes }
         .minByOrNull { it.startMinutes }
 
     Surface(

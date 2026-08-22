@@ -116,6 +116,26 @@ class NotificationScheduleTest {
         assertEquals(null, NotificationSchedule.nextReminderAfter(events, nowAfterOneHour, zone))
     }
 
+    @Test
+    fun windows_skipsCompletedTokuten() {
+        val events = listOf(
+            event(1, 10 * 60, 11 * 60).copy(completed = true),
+            event(2, 12 * 60, 13 * 60),
+        )
+        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + (10 * 60 + 30) * 60_000L
+
+        assertTrue(NotificationSchedule.activeAt(events, now, zone).isEmpty())
+        assertEquals(2L, NotificationSchedule.nextWindowAfter(events, now, zone)!!.event.id)
+    }
+
+    @Test
+    fun nextReminderAfter_skipsCompletedTokuten() {
+        val events = listOf(event(1, 10 * 60, 11 * 60).copy(completed = true))
+        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() - 60 * 60_000L
+
+        assertEquals(null, NotificationSchedule.nextReminderAfter(events, now, zone))
+    }
+
     private fun event(id: Long, start: Int, end: Int) = ScheduleEvent(
         id = id,
         team = "Team$id",

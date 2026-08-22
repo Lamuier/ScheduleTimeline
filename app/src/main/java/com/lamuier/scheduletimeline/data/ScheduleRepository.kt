@@ -74,6 +74,15 @@ class ScheduleRepository(
         }
     }
 
+    /** 仅特典可标记完成；完成后通知不再提醒该日程。 */
+    suspend fun setTokutenCompleted(id: Long, completed: Boolean): Boolean {
+        val event = eventDao.getById(id) ?: return false
+        if (EventType.fromStorage(event.eventType) != EventType.TOKUTEN) return false
+        if (event.completed == completed) return true
+        eventDao.update(event.copy(completed = completed))
+        return true
+    }
+
     suspend fun clearAll() {
         database.withTransaction {
             eventDao.deleteAll()

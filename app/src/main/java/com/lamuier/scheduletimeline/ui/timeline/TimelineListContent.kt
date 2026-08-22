@@ -1,8 +1,17 @@
 package com.lamuier.scheduletimeline.ui.timeline
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,10 +31,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,7 +48,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +81,10 @@ import com.lamuier.scheduletimeline.ui.theme.LocalDarkTheme
 import com.lamuier.scheduletimeline.ui.theme.ScheduleTimelineTheme
 import com.lamuier.scheduletimeline.ui.theme.adaptTo
 import com.lamuier.scheduletimeline.ui.theme.eventTypeColors
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 
 @Composable
 internal fun TimelineList(
@@ -75,53 +95,121 @@ internal fun TimelineList(
 ) {
     // 用 LazyListState 直接取可见 item 在视口内的 offset/size，避免 onPlaced 坐标空间错位。
     val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    val nowItemKey = remember(items, nowMinutes) {
+        nowMinutes?.let { now -> nowContainingItemKey(items, now) }
+    }
+    var lastCenteredKey by remember { mutableStateOf<String?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 12.dp, end = 20.dp, top = 8.dp, bottom = 80.dp),
-        ) {
-            itemsIndexed(items, key = { index, item ->
-                when (item) {
-                    is TimelineItem.Event -> "e-${item.event.id}"
-                    is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
-                    is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
-                }
-            }) { index, item ->
-                TimelineNode(
-                    isFirst = index == 0,
-                    isLast = index == items.lastIndex,
-                    item = item,
-                ) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        // 有「现在」落点时上下各留半屏空白，才能把时间线滚到视口正中（含当天第一条/最后一条）。
+        val extraPad = if (nowItemKey != null) maxHeight / 2 else 8.dp
+        val bottomPad = extraPad.coerceAtLeast(80.dp)
+        val cardBottomPadPx = with(density) { 16.dp.roundToPx() }
+
+        LaunchedEffect(nowItemKey, items, extraPad) {
+            val now = nowMinutes
+            if (now == null || nowItemKey == null || nowItemKey == lastCenteredKey) return@LaunchedEffect
+            centerNowLine(listState, items, now, cardBottomPadPx)
+            lastCenteredKey = nowItemKey
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = 12.dp,
+                    end = 20.dp,
+                    top = extraPad,
+                    bottom = bottomPad,
+                ),
+            ) {
+                itemsIndexed(items, key = { index, item ->
                     when (item) {
-                        is TimelineItem.Event -> EventCard(
-                            item = item,
-                            nowMinutes = nowMinutes,
-                            onClick = { onSelectEvent(item) },
-                        )
-                        is TimelineItem.OverlapGroup -> ParallelEventCards(
-                            group = item,
-                            events = events,
-                            nowMinutes = nowMinutes,
-                            onSelectEvent = onSelectEvent,
-                        )
-                        is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
+                        is TimelineItem.Event -> "e-${item.event.id}"
+                        is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
+                        is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
+                    }
+                }) { index, item ->
+                    TimelineNode(
+                        isFirst = index == 0,
+                        isLast = index == items.lastIndex,
+                        item = item,
+                    ) {
+                        when (item) {
+                            is TimelineItem.Event -> EventCard(
+                                item = item,
+                                nowMinutes = nowMinutes,
+                                onClick = { onSelectEvent(item) },
+                            )
+                            is TimelineItem.OverlapGroup -> ParallelEventCards(
+                                group = item,
+                                events = events,
+                                nowMinutes = nowMinutes,
+                                onSelectEvent = onSelectEvent,
+                            )
+                            is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
+                        }
                     }
                 }
             }
-        }
 
-        // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示，
-        // 位置直接由 LazyListState 的可见 item 信息插值得到，随滚动与当前时间实时更新。
-        if (nowMinutes != null) {
-            val bottomPadPx = with(LocalDensity.current) { 16.dp.roundToPx() }
-            val nowY = computeNowY(listState, items, nowMinutes, bottomPadPx)
-            if (nowY != null) {
-                NowLine(y = nowY)
+            // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示，
+            // 位置直接由 LazyListState 的可见 item 信息插值得到，随滚动与当前时间实时更新。
+            if (nowMinutes != null) {
+                val nowY = computeNowY(listState, items, nowMinutes, cardBottomPadPx)
+                if (nowY != null) {
+                    NowLine(y = nowY)
+                }
             }
         }
     }
+}
+
+private fun itemTimeRange(item: TimelineItem): Pair<Int, Int> = when (item) {
+    is TimelineItem.Event -> item.event.startMinutes to item.event.endMinutes
+    is TimelineItem.OverlapGroup -> item.startMinutes to item.endMinutes
+    is TimelineItem.Gap -> item.startMinutes to item.endMinutes
+}
+
+private fun nowContainingItemKey(items: List<TimelineItem>, now: Int): String? {
+    val index = items.indices.firstOrNull { i ->
+        val (start, end) = itemTimeRange(items[i])
+        now in start until end
+    } ?: return null
+    return when (val item = items[index]) {
+        is TimelineItem.Event -> "e-${item.event.id}"
+        is TimelineItem.OverlapGroup ->
+            "o-${item.events.joinToString("-") { it.event.id.toString() }}"
+        is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
+    }
+}
+
+private suspend fun centerNowLine(
+    listState: LazyListState,
+    items: List<TimelineItem>,
+    now: Int,
+    bottomPadPx: Int,
+) {
+    val index = items.indices.firstOrNull { i ->
+        val (start, end) = itemTimeRange(items[i])
+        now in start until end
+    } ?: return
+
+    listState.scrollToItem(index)
+    val placed = withTimeoutOrNull(750) {
+        snapshotFlow { computeNowY(listState, items, now, bottomPadPx) }
+            .filterNotNull()
+            .first()
+    } ?: return
+    val nowY = placed
+    val viewport = listState.layoutInfo.viewportEndOffset -
+        listState.layoutInfo.viewportStartOffset
+    if (viewport <= 0) return
+    val delta = nowY - viewport / 2f
+    if (abs(delta) < 4f) return
+    listState.scrollBy(delta)
 }
 
 /**
@@ -273,7 +361,7 @@ private fun TimelineNode(
 
 /**
  * 卡片只展示主要概览（时间、团队/标题、类型）；地点、关联演出/特典、重叠警告、备注
- * 统一收进 [EventDetailSheet]。进行中的事件在卡片顶部画一条进度线，标明当前进行到哪。
+ * 统一收进 [EventDetailSheet]。进行中的事件用边框闪烁标出当前日程；冲突时重叠的各方都闪。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -292,21 +380,25 @@ private fun EventCard(
     }
     val cardContainer = colors.accent.copy(alpha = if (dark) 0.18f else 0.12f)
 
-    val inProgress = nowMinutes != null && nowMinutes in event.startMinutes until event.endMinutes
-    val progressFraction = if (inProgress && event.endMinutes > event.startMinutes) {
-        ((nowMinutes!! - event.startMinutes).toFloat() / (event.endMinutes - event.startMinutes))
-            .coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    val inProgress = isEventInProgress(event, nowMinutes)
+    val blinkAlpha = rememberBlinkAlpha(enabled = inProgress)
+    val cardAlpha = if (event.completed) 0.62f else 1f
 
-    Box(modifier = modifier.fillMaxWidth()) {
-        Card(
-            onClick = onClick,
-            modifier = if (fillHeight) Modifier.fillMaxWidth().fillMaxHeight() else Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = cardContainer),
-        ) {
+    Card(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = cardContainer.copy(alpha = cardContainer.alpha * cardAlpha),
+        ),
+        border = if (inProgress) {
+            BorderStroke(2.dp, ProgressRed.copy(alpha = blinkAlpha))
+        } else {
+            null
+        },
+    ) {
             Column(
                 modifier = Modifier.padding(if (compact) 10.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
@@ -334,6 +426,20 @@ private fun EventCard(
                             color = colors.accent,
                         )
                     }
+                    if (event.completed) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.event_completed),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
 
                 Text(
@@ -358,26 +464,6 @@ private fun EventCard(
                 }
             }
         }
-
-        // 进行中：卡片左侧竖线进度，红线由上往下实时填充，标明当前进行到哪。
-        if (inProgress) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(3.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(1.5.dp))
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(progressFraction)
-                        .background(ProgressRed),
-                )
-            }
-        }
-    }
 }
 
 /**
@@ -395,8 +481,28 @@ private val PARALLEL_MIN_CARD_HEIGHT = 96.dp
 /** 并行轨道内相邻卡片之间的视觉间隙，避免时间连续的卡片贴在一起像一块。 */
 private val PARALLEL_CARD_GAP = 4.dp
 
-/** 进行中竖线进度颜色（红线）。 */
+/** 当前时间轴 / 进行中边框闪烁颜色。 */
 private val ProgressRed = Color(0xFFE53935)
+
+private fun isEventInProgress(event: ScheduleEvent, nowMinutes: Int?): Boolean =
+    nowMinutes != null &&
+        !event.completed &&
+        nowMinutes in event.startMinutes until event.endMinutes
+
+@Composable
+private fun rememberBlinkAlpha(enabled: Boolean): Float {
+    val infinite = rememberInfiniteTransition(label = "event-border-blink")
+    val alpha by infinite.animateFloat(
+        initialValue = 0.28f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 750, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "border-alpha",
+    )
+    return if (enabled) alpha else 1f
+}
 
 @Composable
 private fun ParallelEventCards(
@@ -528,7 +634,6 @@ private fun GapCard(item: TimelineItem.Gap, nowMinutes: Int? = null) {
             }
 
             // 空闲进行中：底部细进度条，宽度 = 已过时长占比，标明当前进行到哪。
-            // 与进行中事件卡顶部的进度线呼应：事件是「还剩多少」，空闲是「熬过多少」。
             if (inProgress) {
                 Box(
                     modifier = Modifier
@@ -566,6 +671,7 @@ internal fun EventDetailSheet(
     events: List<ScheduleEvent>,
     onEdit: () -> Unit,
     onDismiss: () -> Unit,
+    onCompleteTokuten: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val event = item.event
@@ -737,6 +843,29 @@ internal fun EventDetailSheet(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                             )
+                        }
+                    }
+                }
+
+                if (EventType.fromStorage(event.eventType) == EventType.TOKUTEN) {
+                    if (event.completed) {
+                        Text(
+                            text = stringResource(R.string.event_completed_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else if (onCompleteTokuten != null) {
+                        Button(
+                            onClick = onCompleteTokuten,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.action_complete_event))
                         }
                     }
                 }

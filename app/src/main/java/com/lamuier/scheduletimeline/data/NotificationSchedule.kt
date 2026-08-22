@@ -24,6 +24,8 @@ object NotificationSchedule {
         events: List<ScheduleEvent>,
         zone: ZoneId,
     ): List<ScheduledEventWindow> = events.mapNotNull { event ->
+        // 已完成的特典不再进入常驻通知、进度刷新与关键时间点提醒。
+        if (event.completed) return@mapNotNull null
         val date = runCatching { LocalDate.parse(event.dayKey) }.getOrNull() ?: return@mapNotNull null
         val start = date.atStartOfDay(zone).toInstant().toEpochMilli() + event.startMinutes * 60_000L
         val end = date.atStartOfDay(zone).toInstant().toEpochMilli() + event.endMinutes * 60_000L

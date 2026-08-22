@@ -12,7 +12,6 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
-import android.text.SpannableStringBuilder
 import androidx.core.content.ContextCompat
 import com.lamuier.scheduletimeline.MainActivity
 import com.lamuier.scheduletimeline.R
@@ -107,8 +106,22 @@ class ScheduleNotificationCoordinator(
             preferences.enabled.value && canPostNotifications()
         ) {
             val event = repository.allEvents().firstOrNull { it.id == eventId }
-            if (event != null) {
+            if (event != null && !event.completed) {
                 postReminder(event, kind)
+            }
+        }
+        refresh()
+    }
+
+    /**
+     * 特典「完成」动作：标记后该日程不再进入常驻通知与关键时间点提醒，
+     * 已弹出的提醒一并取消，再 refresh 重算当前 Live Update。
+     */
+    suspend fun handleComplete(intent: Intent?) {
+        val eventId = intent?.getLongExtra(EXTRA_EVENT_ID, -1L) ?: -1L
+        if (eventId > 0) {
+            if (repository.setTokutenCompleted(eventId, completed = true)) {
+                cancelRemindersFor(eventId)
             }
         }
         refresh()
@@ -159,8 +172,7 @@ class ScheduleNotificationCoordinator(
             .setWhen(System.currentTimeMillis())
             .setTimeoutAfter(REMINDER_AUTO_DISMISS_MILLIS)
             .build()
-        val notificationId = REMINDER_NOTIFICATION_ID_BASE +
-            (event.id % 1_000).toInt() * ReminderKind.entries.size + kind.ordinal
+        val notificationId = reminderNotificationId(event.id, kind)
         runCatching { notificationManager.notify(notificationId, notification) }
     }
 
@@ -318,9 +330,9 @@ class ScheduleNotificationCoordinator(
         val durationMs = max(1, (endMillis - startMillis).toInt())
         val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
         builder.setProgress(durationMs, progressMs, false)
+        addTokutenCompleteActions(builder, events, upcoming)
         applyAndroid16LiveUpdate(
             builder = builder,
-            text = text,
             startMillis = startMillis,
             endMillis = endMillis,
             nowMillis = nowMillis,
@@ -419,7 +431,6 @@ class ScheduleNotificationCoordinator(
 
     private fun applyAndroid16LiveUpdate(
         builder: Notification.Builder,
-        text: String,
         startMillis: Long,
         endMillis: Long,
         nowMillis: Long,
@@ -432,11 +443,6 @@ class ScheduleNotificationCoordinator(
         val durationMs = max(1, (endMillis - startMillis).toInt())
         val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
         val segment = Notification.ProgressStyle.Segment(durationMs)
-        // Android 17 语义着色：仅 promoted（灵动岛/常驻表面）生效，不设 setColor
-        // 以免覆盖语义（color 优先级高于 style）。
-        if (Build.VERSION.SDK_INT >= 37) {
-            segment.setSemanticStyle(semanticStyleFor(upcoming))
-        }
         val progressStyle = Notification.ProgressStyle()
             .setProgress(progressMs)
             .addProgressSegment(segment)
@@ -465,23 +471,39 @@ class ScheduleNotificationCoordinator(
                 putBoolean(EXTRA_REQUEST_PROMOTED_ONGOING, true)
             })
         }
-
-        // Android 17：contentText 整段语义注解，与进度段同色，
-        // promoted 表面上系统按语义渲染文本颜色。
-        if (Build.VERSION.SDK_INT >= 37) {
-            val annotation = Notification.createSemanticStyleAnnotation(
-                semanticStyleFor(upcoming),
-            )
-            builder.setContentText(SpannableStringBuilder().apply { append(text, annotation, 0) })
-        }
     }
 
     /**
-     * Android 17 Live Updates 语义颜色：进行中 = INFO（蓝，信息性），
-     * 空档等待下一项 = SAFE（绿，无待办压力）。
+     * 进行中的特典在 Live Update 上提供「完成」动作；多项特典时每项一条，最多 3 条。
      */
-    private fun semanticStyleFor(upcoming: Boolean): Int =
-        if (upcoming) Notification.SEMANTIC_STYLE_SAFE else Notification.SEMANTIC_STYLE_INFO
+    private fun addTokutenCompleteActions(
+        builder: Notification.Builder,
+        events: List<ScheduleEvent>,
+        upcoming: Boolean,
+    ) {
+        if (upcoming) return
+        val tokuten = events.filter {
+            EventType.fromStorage(it.eventType) == EventType.TOKUTEN && !it.completed
+        }
+        tokuten.take(MAX_COMPLETE_ACTIONS).forEach { event ->
+            val title = if (tokuten.size == 1) {
+                appContext.getString(R.string.notification_action_complete)
+            } else {
+                appContext.getString(
+                    R.string.notification_action_complete_named,
+                    event.teamDisplay.ifBlank { event.title }
+                        .ifBlank { appContext.getString(R.string.event_untitled) },
+                )
+            }
+            builder.addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(appContext, R.drawable.ic_notification),
+                    title,
+                    completePendingIntent(event.id),
+                ).build(),
+            )
+        }
+    }
 
     private fun scheduleNextBoundary(
         events: List<ScheduleEvent>,
@@ -576,9 +598,29 @@ class ScheduleNotificationCoordinator(
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    private fun completePendingIntent(eventId: Long): PendingIntent = PendingIntent.getBroadcast(
+        appContext,
+        COMPLETE_REQUEST_CODE_BASE + (eventId % 1_000).toInt(),
+        Intent(appContext, ScheduleAlarmReceiver::class.java)
+            .setAction(ACTION_COMPLETE)
+            .putExtra(EXTRA_EVENT_ID, eventId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun cancelRemindersFor(eventId: Long) {
+        ReminderKind.entries.forEach { kind ->
+            notificationManager.cancel(reminderNotificationId(eventId, kind))
+        }
+    }
+
+    private fun reminderNotificationId(eventId: Long, kind: ReminderKind): Int =
+        REMINDER_NOTIFICATION_ID_BASE +
+            (eventId % 1_000).toInt() * ReminderKind.entries.size + kind.ordinal
+
     companion object {
         const val ACTION_REFRESH = "com.lamuier.scheduletimeline.action.REFRESH_NOTIFICATIONS"
         const val ACTION_REMINDER = "com.lamuier.scheduletimeline.action.SCHEDULE_REMINDER"
+        const val ACTION_COMPLETE = "com.lamuier.scheduletimeline.action.COMPLETE_TOKUTEN"
         const val EXTRA_EVENT_ID = "extra_event_id"
         const val EXTRA_REMINDER_KIND = "extra_reminder_kind"
         const val LIVE_NOTIFICATION_ID = 4101
@@ -590,11 +632,13 @@ class ScheduleNotificationCoordinator(
         private const val BOUNDARY_REQUEST_CODE = 4103
         private const val REMINDER_ALARM_REQUEST_CODE = 4108
         private const val REMINDER_CONTENT_REQUEST_CODE = 4109
+        private const val COMPLETE_REQUEST_CODE_BASE = 4120
         private const val REMINDER_NOTIFICATION_ID_BASE = 5_000
         private const val REMINDER_AUTO_DISMISS_MILLIS = 5 * 60_000L
         private const val CHIP_COUNTDOWN_WINDOW_MINUTES = 120L
         /** Status Chip 左侧短文案上限（码点），超出优先截断团队名、保留类型后缀。 */
         private const val CHIP_TEXT_MAX_CHARS = 8
+        private const val MAX_COMPLETE_ACTIONS = 3
         private const val PROGRESS_REFRESH_MIN_MS = 5_000L
         private const val PROGRESS_REFRESH_MAX_MS = 60_000L
         private const val PROGRESS_REFRESH_STEPS = 100L // 把事件时长均分约 100 段 ≈ 每次刷新推进 1%

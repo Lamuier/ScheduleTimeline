@@ -47,8 +47,11 @@
     <string name="event_linked_performance">关联演出：%1$s %2$s</string>
     <string name="event_linked_tokuten">关联特典：%1$s %2$s</string>
     <string name="event_detail_duration">时长：%1$s</string>
-    <string name="event_in_progress">进行中</string>
-    <string name="event_detail_title">日程详情</string>
+    <string name="action_complete_event">完成日程</string>
+    <string name="event_completed">已完成</string>
+    <string name="event_completed_hint">已完成，通知不再提醒该日程</string>
+    <string name="notification_action_complete">完成</string>
+    <string name="notification_action_complete_named">完成 %1$s</string>
 
     <string name="manage_data_title">设置</string>
     <string name="manage_data_subtitle">外观、通知、导入导出与本地数据</string>
