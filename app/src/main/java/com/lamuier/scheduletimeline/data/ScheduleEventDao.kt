@@ -62,6 +62,9 @@ interface ScheduleEventDao {
     suspend fun getByDay(dayKey: String): List<ScheduleEvent>
 
     @Query("SELECT * FROM schedule_events ORDER BY dayKey ASC, startMinutes ASC, endMinutes ASC")
+    fun observeAll(): Flow<List<ScheduleEvent>>
+
+    @Query("SELECT * FROM schedule_events ORDER BY dayKey ASC, startMinutes ASC, endMinutes ASC")
     suspend fun getAll(): List<ScheduleEvent>
 
     @Query("SELECT DISTINCT dayKey FROM schedule_events ORDER BY dayKey ASC")

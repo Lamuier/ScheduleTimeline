@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.view.View
 import android.widget.RemoteViews
 import com.lamuier.scheduletimeline.MainActivity
@@ -60,9 +61,13 @@ object ScheduleWidgetUpdater {
             manager.updateAppWidget(id, buildSmall(appContext, today, events, active, next))
         }
         if (largeIds.isNotEmpty()) {
-            val largeViews = buildLarge(appContext, today, events, active, next)
+            // 每个实例单独绑定 adapter：intent.data 带上当日事件指纹，
+            // 删除/增改后 launcher 必须重绑 RemoteViewsFactory，避免列表缓存旧项。
             largeIds.forEach { id ->
-                manager.updateAppWidget(id, largeViews)
+                manager.updateAppWidget(
+                    id,
+                    buildLarge(appContext, today, events, active, next, id),
+                )
             }
             manager.notifyAppWidgetViewDataChanged(largeIds, R.id.widget_list)
         }
@@ -210,6 +215,7 @@ object ScheduleWidgetUpdater {
         events: List<ScheduleEvent>,
         active: List<ScheduledEventWindow>,
         next: ScheduledEventWindow?,
+        appWidgetId: Int,
     ): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.widget_schedule_large)
 
@@ -246,19 +252,40 @@ object ScheduleWidgetUpdater {
 
         // 根布局与列表卡片背景已在 XML 中设置圆角 drawable
 
-        val empty = events.isEmpty()
-        views.setViewVisibility(R.id.widget_list, if (empty) View.GONE else View.VISIBLE)
-        views.setViewVisibility(R.id.widget_empty, if (empty) View.VISIBLE else View.GONE)
         views.setTextViewText(R.id.widget_empty, context.getString(R.string.widget_empty_today_hint))
         views.setTextColor(R.id.widget_empty, context.getColor(R.color.widget_on_surface_variant))
+        views.setViewVisibility(R.id.widget_list, View.VISIBLE)
+        views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
 
-        // RemoteViewsService 提供列表数据
-        val listIntent = Intent(context, ScheduleWidgetService::class.java)
+        // RemoteViewsService 提供列表数据。data URI 含实例 id + 事件指纹：
+        // 只改 extra 不会让 launcher 当成新 adapter，删除后仍可能显示旧行。
+        val listIntent = Intent(context, ScheduleWidgetService::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            data = Uri.parse(
+                "content://${context.packageName}.widget/large/$appWidgetId/" +
+                    collectionFingerprint(events),
+            )
+        }
         views.setRemoteAdapter(R.id.widget_list, listIntent)
+        views.setEmptyView(R.id.widget_list, R.id.widget_empty)
         // 列表项点击模板：合并 service 的 fillInIntent 后启动 MainActivity
         views.setPendingIntentTemplate(R.id.widget_list, openAppIntent(context))
 
         views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(context))
         return views
     }
+
+    /** 列表可见字段变化即换指纹，迫使 collection adapter 重绑。 */
+    internal fun collectionFingerprint(events: List<ScheduleEvent>): String =
+        events.joinToString(";") { event ->
+            listOf(
+                event.id,
+                event.startMinutes,
+                event.endMinutes,
+                event.team,
+                event.title,
+                event.eventType,
+                event.completed,
+            ).joinToString(":")
+        }.hashCode().toUInt().toString()
 }

@@ -7,7 +7,6 @@ import android.os.Bundle
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
 import com.lamuier.scheduletimeline.data.ScheduleEvent
-import com.lamuier.scheduletimeline.data.teamDisplay
 import org.json.JSONObject
 
 /** Adds Xiaomi HyperIsland OS3 extras while retaining the normal Android notification. */
@@ -33,17 +32,9 @@ object XiaomiHyperIslandAdapter {
         // Capsule (摘要态) follows the official template "图文组件1 + 等宽数字文本组件":
         // area A shows icon + team name + type chip, area B shows the timer digits
         // with a short suffix. Keep the A-area title within a few characters.
-        val islandTitle: String
-        val islandContent: String
-        if (events.size == 1) {
-            // 大岛左标题用「类型字·团队名」纯文本，与通知标题保持一致（演·空色轨迹），
-            // 类型字不再单独放右区，右侧只保留状态文案避免重复。
-            islandTitle = EventLabels.notificationLabel(first)
-            islandContent = ""
-        } else {
-            islandTitle = context.getString(R.string.notification_island_multi_title, events.size)
-            islandContent = context.getString(R.string.notification_short_text)
-        }
+        // 大岛左标题尽量短：单条「演·团队」（截断），多条「N项」；右区只留开场状态。
+        val islandTitle = NotificationCopy.islandTitle(events)
+        val islandContent = ""
         return apply(
             context = context,
             notification = notification,

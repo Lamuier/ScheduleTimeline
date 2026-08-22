@@ -341,14 +341,18 @@ class ScheduleViewModel(
         }
     }
 
-    /** 标记特典已完成：通知不再提醒该日程。 */
-    fun completeTokuten(id: Long, onDone: () -> Unit = {}) {
+    /** 标记或撤销特典完成：完成后通知不再提醒该日程。 */
+    fun setTokutenCompleted(id: Long, completed: Boolean, onDone: () -> Unit = {}) {
         viewModelScope.launch {
-            repository.setTokutenCompleted(id, completed = true)
+            repository.setTokutenCompleted(id, completed)
             refreshNotifications()
             onDone()
         }
     }
+
+    /** 标记特典已完成：通知不再提醒该日程。 */
+    fun completeTokuten(id: Long, onDone: () -> Unit = {}) =
+        setTokutenCompleted(id, completed = true, onDone = onDone)
 
     suspend fun findNearestScheduleHint(): NearestScheduleHint? {
         return ScheduleExport.nearestScheduleHint(

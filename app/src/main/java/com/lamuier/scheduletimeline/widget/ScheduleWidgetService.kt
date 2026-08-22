@@ -18,6 +18,7 @@ import java.time.format.DateTimeFormatter
  * 4×3 小组件当日日程列表的 [RemoteViewsService]。
  *
  * 数据在 [onDataSetChanged] 同步加载，确保 widget 在应用未前台时也能拿到最新日程。
+ * 列表项稳定 id 必须是事件 id：若用 position，删除后 launcher 会把旧行当成同一项缓存下来。
  */
 class ScheduleWidgetService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent?): RemoteViewsFactory {
@@ -40,6 +41,11 @@ private class ScheduleWidgetFactory(
     }
 
     override fun getCount(): Int = events.size
+
+    override fun getItemId(position: Int): Long =
+        events.getOrNull(position)?.id ?: (-position.toLong() - 1)
+
+    override fun hasStableIds(): Boolean = true
 
     override fun getViewAt(position: Int): RemoteViews {
         val event = events.getOrNull(position)
@@ -65,7 +71,7 @@ private class ScheduleWidgetFactory(
         views.setTextColor(R.id.widget_item_title, appContext.getColor(R.color.widget_on_surface))
         // item root 背景已在 XML 中设置圆角 drawable
 
-        // 点击单项同样回到主屏（编辑跳转需 Compose 导航参数，留待后续）
+        // 点击单项深链回主屏并打开对应事件编辑页
         val fillIntent = Intent().apply {
             putExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID, event.id)
         }
@@ -82,7 +88,5 @@ private class ScheduleWidgetFactory(
 
     override fun getLoadingView(): RemoteViews? = null
     override fun getViewTypeCount(): Int = 1
-    override fun getItemId(position: Int): Long = position.toLong()
-    override fun hasStableIds(): Boolean = true
     override fun onDestroy() = Unit
 }

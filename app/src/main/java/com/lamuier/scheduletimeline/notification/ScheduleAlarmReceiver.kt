@@ -15,8 +15,12 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
         if (action != ScheduleNotificationCoordinator.ACTION_REFRESH &&
             action != ScheduleNotificationCoordinator.ACTION_REMINDER &&
             action != ScheduleNotificationCoordinator.ACTION_COMPLETE &&
+            action != ScheduleNotificationCoordinator.ACTION_UNDO &&
             action != Intent.ACTION_BOOT_COMPLETED &&
-            action != Intent.ACTION_MY_PACKAGE_REPLACED
+            action != Intent.ACTION_MY_PACKAGE_REPLACED &&
+            action != Intent.ACTION_DATE_CHANGED &&
+            action != Intent.ACTION_TIMEZONE_CHANGED &&
+            action != Intent.ACTION_TIME_CHANGED
         ) return
 
         val pendingResult = goAsync()
@@ -28,6 +32,8 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
                         application.notificationCoordinator.handleReminder(intent)
                     ScheduleNotificationCoordinator.ACTION_COMPLETE ->
                         application.notificationCoordinator.handleComplete(intent)
+                    ScheduleNotificationCoordinator.ACTION_UNDO ->
+                        application.notificationCoordinator.handleUndo(intent)
                     else -> application.notificationCoordinator.refresh()
                 }
             }
