@@ -36,7 +36,7 @@ object EventLabels {
                     TokutenKind.FINAL -> "终特"
                     null -> null
                 }
-                if (kind == null) "特典" else "特典·$kind"
+                kind ?: "特典"
             }
         }
     }
