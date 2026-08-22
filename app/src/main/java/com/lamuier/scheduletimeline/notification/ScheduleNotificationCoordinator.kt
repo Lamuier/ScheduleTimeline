@@ -27,7 +27,6 @@ import com.lamuier.scheduletimeline.data.TimeFormat
 import com.lamuier.scheduletimeline.data.teamDisplay
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.max
@@ -42,9 +41,6 @@ class ScheduleNotificationCoordinator(
         appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private val zone = ZoneId.systemDefault()
-    private val dateFormatter = DateTimeFormatter.ofPattern(
-        appContext.getString(R.string.date_pattern),
-    )
     /**
      * 通知标题/正文里的「类型单字」与团队名的区分。
      *
@@ -123,12 +119,28 @@ class ScheduleNotificationCoordinator(
     /**
      * 特典「完成」动作：标记后该日程不再进入常驻通知与关键时间点提醒，
      * 已弹出的提醒一并取消，再 refresh 重算当前 Live Update。
+     * 另发一条 5 秒犹豫期通知，期间可点「撤销」恢复。
      */
     suspend fun handleComplete(intent: Intent?) {
         val eventId = intent?.getLongExtra(EXTRA_EVENT_ID, -1L) ?: -1L
+        var undoEvent: ScheduleEvent? = null
         if (eventId > 0) {
-            if (repository.setTokutenCompleted(eventId, completed = true)) {
+            val event = repository.get(eventId)
+            if (event != null && repository.setTokutenCompleted(eventId, completed = true)) {
                 cancelRemindersFor(eventId)
+                undoEvent = event
+            }
+        }
+        refresh()
+        undoEvent?.let(::postCompleteUndo)
+    }
+
+    /** 犹豫期内撤销特典完成，恢复常驻通知与提醒。 */
+    suspend fun handleUndo(intent: Intent?) {
+        val eventId = intent?.getLongExtra(EXTRA_EVENT_ID, -1L) ?: -1L
+        if (eventId > 0) {
+            if (repository.setTokutenCompleted(eventId, completed = false)) {
+                notificationManager.cancel(undoNotificationId(eventId))
             }
         }
         refresh()
@@ -138,21 +150,7 @@ class ScheduleNotificationCoordinator(
         val window = NotificationSchedule.windows(listOf(event), zone).firstOrNull() ?: return
         val start = Instant.ofEpochMilli(window.startMillis).atZone(zone)
         val startTime = TimeFormat.minutesToHm(start.hour * 60 + start.minute)
-        val text = when (kind) {
-            ReminderKind.THREE_DAYS_BEFORE -> appContext.getString(
-                R.string.notification_reminder_text_three_days,
-                start.toLocalDate().format(dateFormatter),
-                startTime,
-            )
-            ReminderKind.DAY_OF_MIDNIGHT -> appContext.getString(
-                R.string.notification_reminder_text_midnight,
-                startTime,
-            )
-            ReminderKind.ONE_HOUR_BEFORE -> appContext.getString(
-                R.string.notification_reminder_text_one_hour,
-                startTime,
-            )
-        }
+        val text = NotificationCopy.reminderText(kind, startTime)
 
         val launchIntent = Intent(appContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -169,7 +167,6 @@ class ScheduleNotificationCoordinator(
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(EventLabels.notificationLabel(event))
             .setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_REMINDER)
             // 行程属敏感个人信息：锁屏隐藏详情，仅显示应用名
@@ -245,60 +242,46 @@ class ScheduleNotificationCoordinator(
         upcoming: Boolean,
         next: ScheduledEventWindow? = null,
     ) {
-        val labels = events.joinToString("、") { EventLabels.notificationLabel(it) }
-        val title = if (upcoming) {
-            appContext.getString(
-                R.string.notification_live_title_upcoming,
-                EventLabels.notificationLabel(events.first()),
-            )
-        } else if (events.size == 1) {
-            appContext.getString(
-                R.string.notification_live_title_single,
-                EventLabels.notificationLabel(events.first()),
-            )
-        } else {
-            appContext.getString(R.string.notification_live_title_multiple, events.size)
-        }
+        val nowDate = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
+        val title = NotificationCopy.liveTitle(upcoming, events)
         val text = if (upcoming) {
-            appContext.getString(
-                R.string.notification_live_upcoming_content,
-                labels,
-                Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate().format(dateFormatter),
-                Instant.ofEpochMilli(startMillis).atZone(zone).toLocalTime().let {
-                    TimeFormat.minutesToHm(it.hour * 60 + it.minute)
-                },
+            val start = Instant.ofEpochMilli(startMillis).atZone(zone)
+            val startHm = TimeFormat.minutesToHm(start.hour * 60 + start.minute)
+            val weekday = start.dayOfWeek
+                .getDisplayName(TextStyle.SHORT, Locale.SIMPLIFIED_CHINESE)
+            NotificationCopy.liveText(
+                upcoming = true,
+                whenText = NotificationCopy.upcomingWhen(
+                    isToday = start.toLocalDate() == nowDate,
+                    weekday = weekday,
+                    timeHm = startHm,
+                ),
+                nextWhen = null,
             )
         } else {
-            val base = appContext.getString(
-                R.string.notification_live_content,
-                labels,
-                Instant.ofEpochMilli(endMillis).atZone(zone).toLocalTime().let {
-                    TimeFormat.minutesToHm(it.hour * 60 + it.minute)
-                },
-            )
-            if (next == null) {
-                base
-            } else {
-                val nextStart = Instant.ofEpochMilli(next.startMillis).atZone(zone)
-                val nextTime = TimeFormat.minutesToHm(
-                    nextStart.hour * 60 + nextStart.minute,
-                )
-                // 下一项不在今天时仅显示几点几分会误导，补星期前缀
-                val nextWhen = if (nextStart.toLocalDate() ==
-                    Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-                ) {
-                    nextTime
+            val endHm = Instant.ofEpochMilli(endMillis).atZone(zone).toLocalTime().let {
+                TimeFormat.minutesToHm(it.hour * 60 + it.minute)
+            }
+            val nextWhen = next?.let {
+                val nextStart = Instant.ofEpochMilli(it.startMillis).atZone(zone)
+                val nextHm = TimeFormat.minutesToHm(nextStart.hour * 60 + nextStart.minute)
+                if (nextStart.toLocalDate() == nowDate) {
+                    nextHm
                 } else {
                     val weekday = nextStart.dayOfWeek
                         .getDisplayName(TextStyle.SHORT, Locale.SIMPLIFIED_CHINESE)
-                    appContext.getString(R.string.notification_chip_later, weekday, nextTime)
+                    NotificationCopy.upcomingWhen(
+                        isToday = false,
+                        weekday = weekday,
+                        timeHm = nextHm,
+                    )
                 }
-                base + appContext.getString(
-                    R.string.notification_live_next_suffix,
-                    EventLabels.notificationLabel(next.event),
-                    nextWhen,
-                )
             }
+            NotificationCopy.liveText(
+                upcoming = false,
+                whenText = endHm,
+                nextWhen = nextWhen,
+            )
         }
         val launchIntent = Intent(appContext, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -310,13 +293,11 @@ class ScheduleNotificationCoordinator(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val badgedText = text
         val builder = Notification.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(islandLargeIcon())
             .setContentTitle(title)
-            .setContentText(badgedText)
-            .setStyle(Notification.BigTextStyle().bigText(badgedText))
+            .setContentText(text)
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_EVENT)
             // 行程属敏感个人信息：锁屏隐藏团队名与时间等详情，仅显示脱敏公开版
@@ -423,12 +404,7 @@ class ScheduleNotificationCoordinator(
      * 保留类型字与分隔点。
      */
     private fun activeChipText(events: List<ScheduleEvent>): String {
-        if (events.size != 1) {
-            return appContext.getString(R.string.notification_short_text)
-        }
-        val event = events.first()
-        return EventLabels.notificationLabel(event)
-            .take(CHIP_TEXT_MAX_CHARS)
+        return NotificationCopy.islandTitle(events)
             .ifBlank { appContext.getString(R.string.notification_short_text) }
     }
 
@@ -495,7 +471,8 @@ class ScheduleNotificationCoordinator(
                 appContext.getString(
                     R.string.notification_action_complete_named,
                     event.teamDisplay.ifBlank { event.title }
-                        .ifBlank { appContext.getString(R.string.event_untitled) },
+                        .ifBlank { appContext.getString(R.string.event_untitled) }
+                        .take(6),
                 )
             }
             builder.addAction(
@@ -610,6 +587,53 @@ class ScheduleNotificationCoordinator(
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    private fun undoPendingIntent(eventId: Long): PendingIntent = PendingIntent.getBroadcast(
+        appContext,
+        UNDO_REQUEST_CODE_BASE + (eventId % 1_000).toInt(),
+        Intent(appContext, ScheduleAlarmReceiver::class.java)
+            .setAction(ACTION_UNDO)
+            .putExtra(EXTRA_EVENT_ID, eventId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    /** 完成特典后的 5 秒犹豫期：短通知 +「撤销」，超时自动消失。 */
+    private fun postCompleteUndo(event: ScheduleEvent) {
+        if (!canPostNotifications()) return
+        val label = EventLabels.notificationLabel(event)
+        val notification = Notification.Builder(appContext, REMINDER_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(appContext.getString(R.string.notification_undo_title))
+            .setContentText(label)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    appContext,
+                    UNDO_CONTENT_REQUEST_CODE,
+                    Intent(appContext, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(appContext, R.drawable.ic_notification),
+                    appContext.getString(R.string.notification_action_undo),
+                    undoPendingIntent(event.id),
+                ).build(),
+            )
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setTimeoutAfter(UNDO_WINDOW_MILLIS)
+            .build()
+        runCatching { notificationManager.notify(undoNotificationId(event.id), notification) }
+    }
+
+    private fun undoNotificationId(eventId: Long): Int =
+        UNDO_NOTIFICATION_ID_BASE + (eventId % 1_000).toInt()
+
     private fun cancelRemindersFor(eventId: Long) {
         ReminderKind.entries.forEach { kind ->
             notificationManager.cancel(reminderNotificationId(eventId, kind))
@@ -624,6 +648,7 @@ class ScheduleNotificationCoordinator(
         const val ACTION_REFRESH = "com.lamuier.scheduletimeline.action.REFRESH_NOTIFICATIONS"
         const val ACTION_REMINDER = "com.lamuier.scheduletimeline.action.SCHEDULE_REMINDER"
         const val ACTION_COMPLETE = "com.lamuier.scheduletimeline.action.COMPLETE_TOKUTEN"
+        const val ACTION_UNDO = "com.lamuier.scheduletimeline.action.UNDO_TOKUTEN"
         const val EXTRA_EVENT_ID = "extra_event_id"
         const val EXTRA_REMINDER_KIND = "extra_reminder_kind"
         const val LIVE_NOTIFICATION_ID = 4101
@@ -636,11 +661,13 @@ class ScheduleNotificationCoordinator(
         private const val REMINDER_ALARM_REQUEST_CODE = 4108
         private const val REMINDER_CONTENT_REQUEST_CODE = 4109
         private const val COMPLETE_REQUEST_CODE_BASE = 4120
+        private const val UNDO_REQUEST_CODE_BASE = 4220
+        private const val UNDO_CONTENT_REQUEST_CODE = 4110
         private const val REMINDER_NOTIFICATION_ID_BASE = 5_000
+        private const val UNDO_NOTIFICATION_ID_BASE = 6_000
         private const val REMINDER_AUTO_DISMISS_MILLIS = 5 * 60_000L
+        private const val UNDO_WINDOW_MILLIS = 5_000L
         private const val CHIP_COUNTDOWN_WINDOW_MINUTES = 120L
-        /** Status Chip 左侧短文案上限（码点），超出优先截断团队名、保留类型后缀。 */
-        private const val CHIP_TEXT_MAX_CHARS = 8
         private const val MAX_COMPLETE_ACTIONS = 3
         private const val PROGRESS_REFRESH_MIN_MS = 5_000L
         private const val PROGRESS_REFRESH_MAX_MS = 60_000L

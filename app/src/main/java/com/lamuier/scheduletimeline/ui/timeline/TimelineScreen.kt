@@ -266,12 +266,18 @@ fun TimelineScreen(
                 onEditEvent(id)
             },
             onCompleteTokuten = {
-                val id = event.event.id
-                selectedEvent = null
-                viewModel.completeTokuten(id)
+                viewModel.setTokutenCompleted(event.event.id, completed = true)
+                selectedEvent = event.copy(event = event.event.copy(completed = true))
             }.takeIf {
                 EventType.fromStorage(event.event.eventType) == EventType.TOKUTEN &&
                     !event.event.completed
+            },
+            onUndoTokuten = {
+                viewModel.setTokutenCompleted(event.event.id, completed = false)
+                selectedEvent = event.copy(event = event.event.copy(completed = false))
+            }.takeIf {
+                EventType.fromStorage(event.event.eventType) == EventType.TOKUTEN &&
+                    event.event.completed
             },
             onDismiss = { selectedEvent = null },
         )

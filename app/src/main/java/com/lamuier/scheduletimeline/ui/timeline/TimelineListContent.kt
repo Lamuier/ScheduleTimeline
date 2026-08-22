@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -797,6 +798,7 @@ internal fun EventDetailSheet(
     onEdit: () -> Unit,
     onDismiss: () -> Unit,
     onCompleteTokuten: (() -> Unit)? = null,
+    onUndoTokuten: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val event = item.event
@@ -981,6 +983,14 @@ internal fun EventDetailSheet(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (onUndoTokuten != null) {
+                            OutlinedButton(
+                                onClick = onUndoTokuten,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.action_undo_complete))
+                            }
+                        }
                     } else if (onCompleteTokuten != null) {
                         Button(
                             onClick = onCompleteTokuten,

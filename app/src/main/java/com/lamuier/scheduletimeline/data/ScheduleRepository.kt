@@ -12,6 +12,8 @@ class ScheduleRepository(
 ) {
     fun observeDay(dayKey: String): Flow<List<ScheduleEvent>> = eventDao.observeByDay(dayKey)
 
+    fun observeAll(): Flow<List<ScheduleEvent>> = eventDao.observeAll()
+
     fun observeCategories(): Flow<List<Category>> = categoryDao.observeAll()
 
     suspend fun addCategory(name: String) = categoryDao.insert(Category(name))

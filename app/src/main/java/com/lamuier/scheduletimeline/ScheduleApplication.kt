@@ -35,7 +35,20 @@ class ScheduleApplication : Application() {
             preferences = notificationPreferences,
         )
         AppShortcuts.register(this)
+        observeScheduleChanges()
         refreshNotifications()
+    }
+
+    /**
+     * 以 Room 为小组件 / 通知的单一数据源：任意日程增删改（含删除团队时连带改写）
+     * 都会自动刷新，避免只靠调用方记得 [refreshNotifications]。
+     */
+    private fun observeScheduleChanges() {
+        applicationScope.launch {
+            repository.observeAll().collect {
+                refreshNotifications()
+            }
+        }
     }
 
     fun refreshNotifications() {
