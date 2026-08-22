@@ -53,6 +53,15 @@ object EventLabels {
         return "$team${typeMark(event)}"
     }
 
+    /**
+     * 通知标题专用：「类型字·团队名」（如「演·空色轨迹」）。
+     * 用纯文本分隔类型与团队，无需 Span，可安全跨进程发往 SystemUI。
+     */
+    fun notificationLabel(event: ScheduleEvent): String {
+        val team = event.teamDisplay.ifBlank { event.title }.ifBlank { "?" }
+        return "${typeMark(event)}·$team"
+    }
+
     fun eventTypeStorageFromCsv(label: String): EventType = when (label.trim()) {
         "特典" -> EventType.TOKUTEN
         "演出" -> EventType.PERFORMANCE

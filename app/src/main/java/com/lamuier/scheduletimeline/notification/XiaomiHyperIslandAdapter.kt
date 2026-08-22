@@ -36,8 +36,10 @@ object XiaomiHyperIslandAdapter {
         val islandTitle: String
         val islandContent: String
         if (events.size == 1) {
-            islandTitle = first.teamDisplay.ifBlank { first.title }.ifBlank { title }
-            islandContent = EventLabels.typeMark(first)
+            // 大岛左标题用「类型字·团队名」纯文本，与通知标题保持一致（演·空色轨迹），
+            // 类型字不再单独放右区，右侧只保留状态文案避免重复。
+            islandTitle = EventLabels.notificationLabel(first)
+            islandContent = ""
         } else {
             islandTitle = context.getString(R.string.notification_island_multi_title, events.size)
             islandContent = context.getString(R.string.notification_short_text)

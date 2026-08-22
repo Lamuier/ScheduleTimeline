@@ -45,7 +45,14 @@ class ScheduleNotificationCoordinator(
     private val dateFormatter = DateTimeFormatter.ofPattern(
         appContext.getString(R.string.date_pattern),
     )
-
+    /**
+     * 通知标题/正文里的「类型单字」与团队名的区分。
+     *
+     * 关键约束：Notification 跨进程发给 SystemUI 时，非 ParcelableSpan 的 span（如
+     * ReplacementSpan / DynamicDrawableSpan / ImageSpan）都会被丢弃，只剩裸文本。
+     * 因此这里不用任何 span，直接把类型单字以「类型字·团队名」的纯文本形式写入标题/正文，
+     * 既避免跨进程丢失，也天然把「演/特」与团队名用「·」隔开、区分清楚。
+     */
     suspend fun refresh() {
         ensureChannel()
         ensureReminderChannel()
@@ -160,7 +167,7 @@ class ScheduleNotificationCoordinator(
         // 普通提醒：非常驻、不请求 Live Updates 提升、不上岛，5 分钟后自动消失。
         val notification = Notification.Builder(appContext, REMINDER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(EventLabels.displayLabel(event))
+            .setContentTitle(EventLabels.notificationLabel(event))
             .setContentText(text)
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
@@ -238,16 +245,16 @@ class ScheduleNotificationCoordinator(
         upcoming: Boolean,
         next: ScheduledEventWindow? = null,
     ) {
-        val labels = events.joinToString("、") { EventLabels.displayLabel(it) }
+        val labels = events.joinToString("、") { EventLabels.notificationLabel(it) }
         val title = if (upcoming) {
             appContext.getString(
                 R.string.notification_live_title_upcoming,
-                EventLabels.displayLabel(events.first()),
+                EventLabels.notificationLabel(events.first()),
             )
         } else if (events.size == 1) {
             appContext.getString(
                 R.string.notification_live_title_single,
-                EventLabels.displayLabel(events.first()),
+                EventLabels.notificationLabel(events.first()),
             )
         } else {
             appContext.getString(R.string.notification_live_title_multiple, events.size)
@@ -288,7 +295,7 @@ class ScheduleNotificationCoordinator(
                 }
                 base + appContext.getString(
                     R.string.notification_live_next_suffix,
-                    EventLabels.displayLabel(next.event),
+                    EventLabels.notificationLabel(next.event),
                     nextWhen,
                 )
             }
@@ -303,12 +310,13 @@ class ScheduleNotificationCoordinator(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val badgedText = text
         val builder = Notification.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(islandLargeIcon())
             .setContentTitle(title)
-            .setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentText(badgedText)
+            .setStyle(Notification.BigTextStyle().bigText(badgedText))
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_EVENT)
             // 行程属敏感个人信息：锁屏隐藏团队名与时间等详情，仅显示脱敏公开版
@@ -410,23 +418,18 @@ class ScheduleNotificationCoordinator(
     }
 
     /**
-     * Status Chip 左侧短文案：单事件用「团队名+类型」（与 EventLabels.displayLabel 一致），
-     * 多事件回退「进行中」。Chip 极窄，超长团队名截断保类型可见。
+     * Status Chip / 灵动岛胶囊左侧短文案：单事件用「类型字·团队名」（如「演·空色轨迹」），
+     * 与通知标题格式一致；多事件回退「进行中」。Chip 极窄，超长团队名截断，
+     * 保留类型字与分隔点。
      */
     private fun activeChipText(events: List<ScheduleEvent>): String {
         if (events.size != 1) {
             return appContext.getString(R.string.notification_short_text)
         }
         val event = events.first()
-        val type = EventLabels.typeMark(event)
-        val team = event.teamDisplay.ifBlank { event.title }
-        if (team.isBlank()) {
-            return appContext.getString(R.string.notification_short_text)
-        }
-        val full = "$team$type"
-        if (full.length <= CHIP_TEXT_MAX_CHARS) return full
-        val teamBudget = (CHIP_TEXT_MAX_CHARS - type.length).coerceAtLeast(1)
-        return team.take(teamBudget) + type
+        return EventLabels.notificationLabel(event)
+            .take(CHIP_TEXT_MAX_CHARS)
+            .ifBlank { appContext.getString(R.string.notification_short_text) }
     }
 
     private fun applyAndroid16LiveUpdate(

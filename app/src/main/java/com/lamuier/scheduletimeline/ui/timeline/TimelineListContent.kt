@@ -52,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import android.util.Log
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -292,14 +293,22 @@ private fun nowJumpDirection(
         val (start, end) = itemTimeRange(items[i])
         now in start until end
     } ?: return null
-    if (nowY != null) return if (nowY < 0f) NowJumpDirection.Up else NowJumpDirection.Down
-    return if (index < visible.first().index) NowJumpDirection.Up else NowJumpDirection.Down
+    val direction = if (nowY != null) {
+        if (nowY < 0f) NowJumpDirection.Up else NowJumpDirection.Down
+    } else {
+        if (index < visible.first().index) NowJumpDirection.Up else NowJumpDirection.Down
+    }
+    Log.d("TimelineNowLine", "jumpDirection=$direction nowY=$nowY index=$index firstVisible=${visible.firstOrNull()?.index}")
+    return direction
 }
 
 /**
  * 根据 LazyListState 中可见 item 的实际视口位置，计算「现在」(now, 分钟) 在列表中的 y 像素。
  * 落在可见 item 时间范围内时，按其在「卡片区」(去掉内容区底部 [bottomPadPx] 留白) 内的时间占比插值；
  * 这样 now 线的起点/终点与左侧时间标签（卡片顶/底）严格对齐。当前时刻不可见时返回 null。
+ *
+ * 注意：info.offset 是 item 在列表内容坐标系中的偏移，需减去 viewportStartOffset 才得到
+ * 相对于视口的 y；NowLine 与跳转按钮都使用视口坐标，因此这里统一做转换。
  */
 private fun computeNowY(
     listState: LazyListState,
@@ -308,18 +317,23 @@ private fun computeNowY(
     bottomPadPx: Int,
 ): Float? {
     val layoutInfo = listState.layoutInfo
+    val viewportStart = layoutInfo.viewportStartOffset
     for (info in layoutInfo.visibleItemsInfo) {
         val item = items.getOrNull(info.index) ?: continue
-        val (start, end) = when (item) {
-            is TimelineItem.Event -> item.event.startMinutes to item.event.endMinutes
-            is TimelineItem.OverlapGroup -> item.startMinutes to item.endMinutes
-            is TimelineItem.Gap -> item.startMinutes to item.endMinutes
-        }
+        val (start, end) = itemTimeRange(item)
         if (now in start until end) {
             val span = (end - start).coerceAtLeast(1)
             val frac = (now - start).toFloat() / span
             val contentHeight = (info.size - bottomPadPx).coerceAtLeast(1)
-            return info.offset + frac * contentHeight
+            val itemTopInViewport = info.offset - viewportStart
+            val nowY = itemTopInViewport + frac * contentHeight
+            Log.d(
+                "TimelineNowLine",
+                "idx=${info.index} start=$start end=$end " +
+                    "offset=${info.offset} viewportStart=$viewportStart " +
+                    "contentH=$contentHeight frac=$frac nowY=$nowY",
+            )
+            return nowY
         }
     }
     return null
@@ -511,7 +525,7 @@ private fun EventCard(
             containerColor = cardContainer.copy(alpha = cardContainer.alpha * cardAlpha),
         ),
         border = if (inProgress) {
-            BorderStroke(2.dp, ProgressRed.copy(alpha = blinkAlpha))
+            BorderStroke(2.dp, colors.accent.copy(alpha = blinkAlpha))
         } else {
             null
         },
