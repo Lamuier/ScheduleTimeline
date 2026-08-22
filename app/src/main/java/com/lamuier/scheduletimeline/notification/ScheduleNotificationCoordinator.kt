@@ -418,7 +418,7 @@ class ScheduleNotificationCoordinator(
             return appContext.getString(R.string.notification_short_text)
         }
         val event = events.first()
-        val type = EventLabels.typeChip(event)
+        val type = EventLabels.typeMark(event)
         val team = event.teamDisplay.ifBlank { event.title }
         if (team.isBlank()) {
             return appContext.getString(R.string.notification_short_text)

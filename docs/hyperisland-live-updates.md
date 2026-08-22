@@ -54,7 +54,7 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
   协议值读不到时按 OS3 候选处理；不申请白名单、不接入 MiPush。
 
 - **上岛机制**：OS3 使用普通 Android 通知作承载，应用在同一 `LIVE_NOTIFICATION_ID`（`4101`）上更新 `miui.focus.param`（标准 `param_v2`）和 `miui.focus.pics`。JSON 使用 HyperIsland-ToolKit 同款 `protocol=3` 与 `updatable=true`，边界刷新不会产生重复通知。该 payload 作为旧版 OS3 表面的兼容保留，但**上岛的关键是 promoted ongoing 请求**（见核心结论）。
-- **胶囊/岛渲染**：HyperOS 3 常驻岛表面实际是 Android Status Chip（`shortCriticalText` + `setWhen()` 计时）；进行中短文案写「团队名+类型」（如 `Star演出`），不再写死「进行中」。MIUI 大岛对齐 ToolKit `setBigIslandInfo` 左右图文：A 区图标 + 团队名，B 区 `imageTextInfoRight` 类型 +「后开场/已开场」——**仍不挂 digit 计时组件**（会压缩 A 区丢左文字）。`enableFloat=true` 且 `islandFirstFloat=true`（ToolKit 默认）首次自动展开，否则 `airtimeCount` 会一直为 0、用户永远看不到大岛文字。小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。
+- **胶囊/岛渲染**：HyperOS 3 常驻岛表面实际是 Android Status Chip（`shortCriticalText` + `setWhen()` 计时）；进行中短文案写「团队名+单字类型」（如 `Star演`），不再写死「进行中」。MIUI 大岛对齐 ToolKit `setBigIslandInfo` 左右图文：A 区图标 + 团队名，B 区 `imageTextInfoRight` 类型 +「后开场/已开场」——**仍不挂 digit 计时组件**（会压缩 A 区丢左文字）。`enableFloat=true` 且 `islandFirstFloat=true`（ToolKit 默认）首次自动展开，否则 `airtimeCount` 会一直为 0、用户永远看不到大岛文字。小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。
 - **最终呈现由系统决定**：HyperOS SystemUI 决定尺寸、动画、是否显示在顶部状态栏及用户权限；应用不伪造 HyperIsland 状态。关闭通知、无可发布权限或无下一项时，取消同一通知 ID。
 - **实现约束**：直接生成标准模板 payload，不依赖 Kotlin 2.2 编译的第三方二进制，保持工程 Kotlin 2.0.21 基线；不使用自定义 `RemoteViews`，也不设置 Xiaomi `timeout` 字段以避免分钟/秒单位差异。
 

@@ -26,6 +26,13 @@ enum class TokutenKind(val storage: String) {
 }
 
 object EventLabels {
+    /** 标题/徽章用的单字类型：演出 → 演，特典 → 特。 */
+    fun typeMark(event: ScheduleEvent): String =
+        when (EventType.fromStorage(event.eventType)) {
+            EventType.PERFORMANCE -> "演"
+            EventType.TOKUTEN -> "特"
+        }
+
     fun typeChip(event: ScheduleEvent): String {
         return when (EventType.fromStorage(event.eventType)) {
             EventType.PERFORMANCE -> "演出"
@@ -43,7 +50,7 @@ object EventLabels {
 
     fun displayLabel(event: ScheduleEvent): String {
         val team = event.teamDisplay.ifBlank { event.title }.ifBlank { "?" }
-        return "$team${typeChip(event)}"
+        return "$team${typeMark(event)}"
     }
 
     fun eventTypeStorageFromCsv(label: String): EventType = when (label.trim()) {

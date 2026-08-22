@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -69,10 +70,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
 import com.lamuier.scheduletimeline.data.EventType
@@ -439,6 +444,39 @@ private fun TimelineNode(
 }
 
 /**
+ * 类型单字圆标，形如 ①：演出 → 演，特典 → 特。
+ */
+@Composable
+private fun TypeMarkBadge(
+    event: ScheduleEvent,
+    size: Dp,
+    textSize: TextUnit,
+) {
+    val dark = LocalDarkTheme.current
+    val colors = remember(event.eventType, event.tokutenKind, dark) {
+        eventTypeColors(event).adaptTo(dark)
+    }
+    Box(
+        modifier = Modifier
+            .size(size)
+            .border(1.25.dp, colors.accent, CircleShape)
+            .clip(CircleShape)
+            .background(colors.container),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = EventLabels.typeMark(event),
+            color = colors.accent,
+            fontSize = textSize,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            lineHeight = textSize,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
  * 卡片只展示主要概览（时间、团队/标题、类型）；地点、关联演出/特典、重叠警告、备注
  * 统一收进 [EventDetailSheet]。进行中的事件用边框闪烁标出当前日程；冲突时重叠的各方都闪。
  */
@@ -494,17 +532,11 @@ private fun EventCard(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
                     )
-                    Surface(
-                        color = colors.container,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Text(
-                            text = EventLabels.typeChip(event),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.accent,
-                        )
-                    }
+                    TypeMarkBadge(
+                        event = event,
+                        size = if (compact) 20.dp else 24.dp,
+                        textSize = if (compact) 10.sp else 12.sp,
+                    )
                     if (event.completed) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
@@ -795,13 +827,15 @@ internal fun EventDetailSheet(
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
                     )
-                    Surface(
-                        color = colors.container,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
+                    TypeMarkBadge(
+                        event = event,
+                        size = 28.dp,
+                        textSize = 13.sp,
+                    )
+                    if (TokutenKind.fromStorage(event.tokutenKind) != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = EventLabels.typeChip(event),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.accent,
                             fontWeight = FontWeight.Bold,

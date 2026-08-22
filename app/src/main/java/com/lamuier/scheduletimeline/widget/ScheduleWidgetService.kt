@@ -55,7 +55,7 @@ private class ScheduleWidgetFactory(
             TimeFormat.rangeLabel(event.startMinutes, event.endMinutes),
         )
         views.setTextViewText(R.id.widget_item_title, team)
-        views.setTextViewText(R.id.widget_item_chip, EventLabels.typeChip(event))
+        views.setTextViewText(R.id.widget_item_chip, EventLabels.typeMark(event))
 
         val (chipColor, chipBgRes) = chipColors(type)
         views.setTextColor(R.id.widget_item_chip, appContext.getColor(chipColor))

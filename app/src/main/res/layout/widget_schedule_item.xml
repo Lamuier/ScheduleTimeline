@@ -21,13 +21,14 @@
 
     <TextView
         android:id="@+id/widget_item_chip"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
         android:layout_marginStart="6dp"
-        android:paddingHorizontal="6dp"
-        android:paddingVertical="1dp"
-        android:textSize="10sp"
-        tools:text="演出" />
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        tools:text="演" />
 
     <TextView
         android:id="@+id/widget_item_title"

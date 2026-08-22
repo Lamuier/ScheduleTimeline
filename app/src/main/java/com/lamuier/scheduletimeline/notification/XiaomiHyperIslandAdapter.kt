@@ -37,7 +37,7 @@ object XiaomiHyperIslandAdapter {
         val islandContent: String
         if (events.size == 1) {
             islandTitle = first.teamDisplay.ifBlank { first.title }.ifBlank { title }
-            islandContent = EventLabels.typeChip(first)
+            islandContent = EventLabels.typeMark(first)
         } else {
             islandTitle = context.getString(R.string.notification_island_multi_title, events.size)
             islandContent = context.getString(R.string.notification_short_text)
@@ -47,7 +47,7 @@ object XiaomiHyperIslandAdapter {
             notification = notification,
             title = title,
             content = content,
-            subTitle = EventLabels.typeChip(first),
+            subTitle = EventLabels.typeMark(first),
             islandTitle = islandTitle,
             islandContent = islandContent,
             timerSuffix = context.getString(
