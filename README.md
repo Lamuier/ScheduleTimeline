@@ -60,7 +60,7 @@
 | [docs/technical.md](docs/technical.md) | 构建方式、CSV 格式、版本规则、技术栈、项目结构 |
 | [docs/UI-design.md](docs/UI-design.md) | 色彩、字体、间距、组件与时间轴视觉约定 |
 | [docs/hyperisland-live-updates.md](docs/hyperisland-live-updates.md) | Live Updates 与小米超级岛适配说明 |
-| [docs/hyperisland-shizuku-eval.md](docs/hyperisland-shizuku-eval.md) | 为何不接入 Shizuku 绕过超级岛白名单，以及样式适配边界 |
+| [docs/hyperisland-big-island-eval.md](docs/hyperisland-big-island-eval.md) | 官方完整大岛模板怎么用在日程状态上 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本更新记录 |
 | [PRIVACY.md](PRIVACY.md) | 隐私政策（纯本地存储、无收集） |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | 第三方开源组件与许可证声明 |
