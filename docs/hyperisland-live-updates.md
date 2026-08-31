@@ -51,7 +51,7 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
   | 协议版本 | `Settings.System` 的 `notification_focus_protocol` 不是已知的 OS1/OS2（读不到时按 OS3 候选处理）；内容提供器不可读时仍继续发送普通通知协议 |
   | Focus 通知查询 | `content://miui.statusbar.notification.public` 的 `canShowFocus`，**仅作诊断，不是硬门槛**（见第七节：真机已证伪其为上岛必要条件） |
 
-  协议值读不到时按 OS3 候选处理；不申请白名单、不接入 MiPush。
+  协议值读不到时按 OS3 候选处理；不申请白名单、不接入 MiPush、不使用 Shizuku 绕过焦点白名单（决策见 [hyperisland-shizuku-eval.md](hyperisland-shizuku-eval.md)）。
 
 - **上岛机制**：OS3 使用普通 Android 通知作承载，应用在同一 `LIVE_NOTIFICATION_ID`（`4101`）上更新 `miui.focus.param`（标准 `param_v2`）和 `miui.focus.pics`。JSON 使用 HyperIsland-ToolKit 同款 `protocol=3` 与 `updatable=true`，边界刷新不会产生重复通知。该 payload 作为旧版 OS3 表面的兼容保留，但**上岛的关键是 promoted ongoing 请求**（见核心结论）。
 - **胶囊/岛渲染**：HyperOS 3 常驻岛表面实际是 Android Status Chip（`shortCriticalText` + `setWhen()` 计时）；进行中短文案写「团队名+单字类型」（如 `Star演`），不再写死「进行中」。MIUI 大岛对齐 ToolKit `setBigIslandInfo` 左右图文：A 区图标 + 团队名，B 区 `imageTextInfoRight` 类型 +「后开场/已开场」——**仍不挂 digit 计时组件**（会压缩 A 区丢左文字）。`enableFloat=true` 且 `islandFirstFloat=true`（ToolKit 默认）首次自动展开，否则 `airtimeCount` 会一直为 0、用户永远看不到大岛文字。小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。
@@ -253,5 +253,6 @@ adb shell settings get secure focus_notifs
 | Builder 配置 / promoted ongoing 注入 | `ScheduleNotificationCoordinator.kt` |
 | HyperIsland extras 组装 | `XiaomiHyperIslandAdapter.kt`（buildResourceBundle / buildJsonParam） |
 | 设备能力检测（含 Focus 查询非门槛） | `XiaomiHyperIslandCapability.kt` |
+| Shizuku / 白名单决策 | `docs/hyperisland-shizuku-eval.md` |
 | 边界/提醒闹钟调度 | `notification/*`（NotificationSchedule 相关） |
 | 三方参考 | `C:\Users\lamuier\Code\HyperIsland-ToolKit`、`C:\Users\lamuier\Code\livebridge` |

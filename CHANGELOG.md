@@ -34,7 +34,8 @@
 
 ## 未归档
 
-（暂无）
+### 文档
+- 新增 `docs/hyperisland-shizuku-eval.md`：评估用 Shizuku 绕过小米超级岛白名单并加深岛样式适配；结论为不接入 Shizuku，样式继续走现有客户端 payload + Android 16 promoted ongoing
 
 ## 1.11.2 - 2026-08-18（灰度测试，验证后转正）
 

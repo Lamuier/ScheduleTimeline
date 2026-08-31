@@ -101,7 +101,8 @@ ScheduleTimeline/
 ├── AGENTS.md / CHANGELOG.md
 ├── docs/
 │   ├── UI-design.md              ← UI 设计规范
-│   └── hyperisland-live-updates.md  ← Live Updates / 超级岛适配
+│   ├── hyperisland-live-updates.md  ← Live Updates / 超级岛适配
+│   └── hyperisland-shizuku-eval.md  ← Shizuku 绕过白名单评估（不做）
 ├── app/
 │   ├── build.gradle.kts          ← 版本号、依赖、签名
 │   ├── schemas/                  ← Room schema
