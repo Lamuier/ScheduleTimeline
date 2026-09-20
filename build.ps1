@@ -43,7 +43,7 @@ param(
     [switch]$SkipChecks,
     [string]$SigningRoot = "",
     [switch]$AdoptDebugKeystore,
-    [string]$AdoptKeystore = "C:\Users\lamuier\Code\release.keystore",
+    [string]$AdoptKeystore = "",
     [string]$KeyAlias = "release",
     [string]$StorePassword,
     [switch]$GenerateNewKey,

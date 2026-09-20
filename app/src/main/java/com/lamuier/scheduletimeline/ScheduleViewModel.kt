@@ -22,6 +22,8 @@ import com.lamuier.scheduletimeline.ui.edit.EditUiState
 import com.lamuier.scheduletimeline.ui.edit.EditValidationError
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,6 +85,7 @@ class ScheduleViewModel(
 
     private val _editUiState = MutableStateFlow(EditUiState())
     val editUiState: StateFlow<EditUiState> = _editUiState.asStateFlow()
+    private var prepareEditJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -155,7 +158,10 @@ class ScheduleViewModel(
     }
 
     fun deleteTeam(name: String) {
-        viewModelScope.launch { repository.deleteTeam(name) }
+        viewModelScope.launch {
+            repository.deleteTeam(name)
+            refreshNotifications()
+        }
         _editUiState.update { state ->
             val pending = TeamNames.parseInput(state.teamInput).filterNot { it == name }
             state.copy(
@@ -195,15 +201,18 @@ class ScheduleViewModel(
     }
 
     fun prepareEdit(eventId: Long?) {
-        viewModelScope.launch {
+        prepareEditJob?.cancel()
+        prepareEditJob = viewModelScope.launch {
             if (eventId == null) {
                 _editUiState.value = EditUiState(isNew = true)
                 return@launch
             }
             val existing = repository.get(eventId) ?: run {
+                ensureActive()
                 _editUiState.value = EditUiState(isNew = true)
                 return@launch
             }
+            ensureActive()
             val type = EventType.fromStorage(existing.eventType)
             _editUiState.value = EditUiState(
                 loadedId = existing.id,
@@ -323,7 +332,7 @@ class ScheduleViewModel(
                     startMinutes = state.startMinutes,
                     endMinutes = state.endMinutes,
                     note = state.note.trim(),
-                    dayKey = currentDayKey(),
+                    dayKey = existing?.dayKey?.takeIf { it.isNotBlank() } ?: currentDayKey(),
                     completed = state.eventType == EventType.TOKUTEN &&
                         (existing?.completed == true),
                 ),

@@ -65,7 +65,6 @@ private class ScheduleWidgetFactory(
         views.setTextColor(R.id.widget_item_title, appContext.getColor(R.color.widget_on_surface))
         // item root 背景已在 XML 中设置圆角 drawable
 
-        // 点击单项同样回到主屏（编辑跳转需 Compose 导航参数，留待后续）
         val fillIntent = Intent().apply {
             putExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID, event.id)
         }

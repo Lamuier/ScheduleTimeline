@@ -31,6 +31,12 @@ class EventLabelsTest {
         assertEquals("StarDiary特", EventLabels.displayLabel(tokuten(TokutenKind.PRE)))
     }
 
+    @Test
+    fun notificationLabel_usesTypeMarkDotTeam() {
+        assertEquals("演·StarDiary", EventLabels.notificationLabel(performance()))
+        assertEquals("特·StarDiary", EventLabels.notificationLabel(tokuten(TokutenKind.PRE)))
+    }
+
     private fun performance() = ScheduleEvent(
         team = "StarDiary",
         startMinutes = 14 * 60,

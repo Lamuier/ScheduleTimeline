@@ -41,9 +41,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleWidgetIntent(intent)
-        // 仅真实冷启动处理，防止旋转等重建时重放已消费的 shortcut intent
-        if (savedInstanceState == null) handleShortcutIntent(intent)
+        // 仅冷启动消费深链，避免旋转重建把已打开的编辑页再导航一次、冲掉未保存改动。
+        if (savedInstanceState == null) {
+            handleWidgetIntent(intent)
+            handleShortcutIntent(intent)
+        }
         enableEdgeToEdge()
         setContent {
             val viewModel: ScheduleViewModel = viewModel(
@@ -68,7 +70,10 @@ class MainActivity : ComponentActivity() {
                 val deepEventId by widgetEventId
                 LaunchedEffect(deepEventId) {
                     deepEventId?.let { id ->
-                        navController.navigate("edit/$id")
+                        navController.navigate("edit/$id") {
+                            popUpTo("timeline") { inclusive = false }
+                            launchSingleTop = true
+                        }
                         widgetEventId.value = null
                     }
                 }
@@ -80,7 +85,10 @@ class MainActivity : ComponentActivity() {
                         AppShortcuts.ACTION_ADD_EVENT -> {
                             // 固定为今天新增，避免沿用上次停留的非今日日期
                             viewModel.changeDate(LocalDate.now())
-                            navController.navigate("edit")
+                            navController.navigate("edit") {
+                                popUpTo("timeline") { inclusive = false }
+                                launchSingleTop = true
+                            }
                         }
                         AppShortcuts.ACTION_TODAY -> viewModel.changeDate(LocalDate.now())
                         AppShortcuts.ACTION_NEXT_SCHEDULED ->
@@ -155,11 +163,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleWidgetIntent(intent: Intent?) {
-        val id = intent?.getLongExtra(
+        if (intent == null) return
+        val id = intent.getLongExtra(
             ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID,
             -1L,
-        ) ?: -1L
-        if (id != -1L) widgetEventId.value = id
+        )
+        if (id != -1L) {
+            widgetEventId.value = id
+            intent.removeExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID)
+        }
     }
 
     private fun handleShortcutIntent(intent: Intent?) {

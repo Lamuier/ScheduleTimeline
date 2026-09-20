@@ -30,7 +30,7 @@ import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.ZoneId
+import java.time.ZoneOffset
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -223,14 +223,17 @@ fun TimelineScreen(
 
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = currentDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            initialSelectedDateMillis = currentDate.atStartOfDay(ZoneOffset.UTC)
+                .toInstant().toEpochMilli(),
         )
         DatePickerDialog(
             onDismissRequest = { showDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        val date = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val date = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneOffset.UTC)
+                            .toLocalDate()
                         viewModel.changeDate(date)
                     }
                     showDatePicker = false
@@ -341,9 +344,11 @@ private fun CurrentStatusBanner(items: List<TimelineItem>, nowMinutes: Int) {
             is TimelineItem.Gap -> emptyList()
         }
     }
-    val currentEvents = eventItems.filter {
-        !it.event.completed && nowMinutes in it.startMinutes until it.endMinutes
+    val occupyingNow = eventItems.filter {
+        nowMinutes in it.startMinutes until it.endMinutes
     }
+    val currentEvents = occupyingNow.filter { !it.event.completed }
+    val completedOnlyNow = occupyingNow.isNotEmpty() && currentEvents.isEmpty()
     val currentGap = items.filterIsInstance<TimelineItem.Gap>()
         .find { nowMinutes in it.startMinutes until it.endMinutes }
     val nextEvent = eventItems
@@ -380,7 +385,7 @@ private fun CurrentStatusBanner(items: List<TimelineItem>, nowMinutes: Int) {
                             it.event.teamDisplay.ifBlank { it.event.title }
                         },
                     )
-                    currentGap != null -> stringResource(R.string.status_free)
+                    currentGap != null || completedOnlyNow -> stringResource(R.string.status_free)
                     else -> stringResource(R.string.status_none)
                 }
                 Text(

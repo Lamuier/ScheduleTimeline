@@ -603,7 +603,7 @@ class ScheduleNotificationCoordinator(
 
     private fun completePendingIntent(eventId: Long): PendingIntent = PendingIntent.getBroadcast(
         appContext,
-        COMPLETE_REQUEST_CODE_BASE + (eventId % 1_000).toInt(),
+        COMPLETE_REQUEST_CODE_BASE + eventId.toInt(),
         Intent(appContext, ScheduleAlarmReceiver::class.java)
             .setAction(ACTION_COMPLETE)
             .putExtra(EXTRA_EVENT_ID, eventId),
@@ -618,7 +618,7 @@ class ScheduleNotificationCoordinator(
 
     private fun reminderNotificationId(eventId: Long, kind: ReminderKind): Int =
         REMINDER_NOTIFICATION_ID_BASE +
-            (eventId % 1_000).toInt() * ReminderKind.entries.size + kind.ordinal
+            eventId.toInt() * ReminderKind.entries.size + kind.ordinal
 
     companion object {
         const val ACTION_REFRESH = "com.lamuier.scheduletimeline.action.REFRESH_NOTIFICATIONS"
@@ -639,7 +639,7 @@ class ScheduleNotificationCoordinator(
         private const val REMINDER_NOTIFICATION_ID_BASE = 5_000
         private const val REMINDER_AUTO_DISMISS_MILLIS = 5 * 60_000L
         private const val CHIP_COUNTDOWN_WINDOW_MINUTES = 120L
-        /** Status Chip 左侧短文案上限（码点），超出优先截断团队名、保留类型后缀。 */
+        /** Status Chip 左侧短文案上限（码点）。格式为「类型字·团队名」，超出从右侧截断。 */
         private const val CHIP_TEXT_MAX_CHARS = 8
         private const val MAX_COMPLETE_ACTIONS = 3
         private const val PROGRESS_REFRESH_MIN_MS = 5_000L

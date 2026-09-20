@@ -18,13 +18,15 @@ data class NearestScheduleHint(
 
 object ScheduleExport {
     const val IMPORT_HEADER =
-        "日期, 团队（多个用 / 分隔）, 类型, 特典种类, 场次说明, 地点, 开始, 结束, 备注"
+        "日期, 团队（多个用 / 分隔）, 类型, 特典种类, 场次说明, 地点, 开始, 结束, 备注, 完成"
+
+    private const val COMPLETED_CSV_YES = "是"
 
     /** 导入样例：含表头；同日演出 / 特典按团队名称自动关联。 */
     const val IMPORT_SAMPLE =
         "$IMPORT_HEADER\n" +
-            "2026-06-01, StarDiary, 演出, , , 主舞台, 14:20, 14:40, \n" +
-            "2026-06-01, StarDiary / 银烁花火, 特典, 平特, , 吧台A, 17:00, 19:00, "
+            "2026-06-01, StarDiary, 演出, , , 主舞台, 14:20, 14:40, , \n" +
+            "2026-06-01, StarDiary / 银烁花火, 特典, 平特, , 吧台A, 17:00, 19:00, , "
 
     fun toCsv(events: List<ScheduleEvent>): String {
         val body = events.joinToString("\n") { event ->
@@ -39,6 +41,7 @@ object ScheduleExport {
                 TimeFormat.minutesToHm(event.startMinutes),
                 TimeFormat.minutesToHm(event.endMinutes),
                 event.note,
+                if (event.completed) COMPLETED_CSV_YES else "",
             ).joinToString(", ") { escapeCsvField(it) }
         }
         return if (body.isEmpty()) IMPORT_HEADER else "$IMPORT_HEADER\n$body"
@@ -56,9 +59,10 @@ object ScheduleExport {
 
     /**
      * 解析批量导入。
-     * - v2（≥9 列）：日期, 团队（多团队用 / 分隔）, 类型, 特典种类, 场次说明, 地点, 开始, 结束, 备注
+     * - v2（≥9 列）：日期, 团队（多团队用 / 分隔）, 类型, 特典种类, 场次说明, 地点, 开始, 结束, 备注[, 完成]
      * - v1（6–7 列）：日期, 标题(→团队), 分类(→类型), 地点, 开始, 结束, 备注
-     * - 已发布的 10 列格式仍可导入；旧「关联演出开始时间」列会被忽略。
+     * - 已发布的 10 列格式仍可导入；旧「关联演出开始时间」列（时钟值）会被忽略；
+     *   新第 10 列「完成」写「是」时仅特典记为已完成。
      * 首行若为表头（日期列=「日期」）则跳过。
      * 解析为引号感知（RFC 4180）：带引号字段中的逗号 / 引号 / 换行不破坏列结构。
      */
@@ -167,6 +171,8 @@ object ScheduleExport {
         }
         val start = TimeFormat.parseHm(parts[6]) ?: return null
         val end = TimeFormat.parseHm(parts[7]) ?: return null
+        val completed = eventType == EventType.TOKUTEN &&
+            parseCompletedColumn(parts.getOrNull(9).orEmpty())
         return ImportDraft(
             event = ScheduleEvent(
                 team = team,
@@ -178,6 +184,7 @@ object ScheduleExport {
                 endMinutes = end,
                 note = parts.getOrNull(8).orEmpty(),
                 dayKey = dayKey,
+                completed = completed,
             ),
         )
     }
@@ -210,6 +217,20 @@ object ScheduleExport {
                 category = "",
             ),
         )
+    }
+
+    /**
+     * 第 10 列：新格式为完成标记（是 / 已完成 / 1 / true）；
+     * 旧格式为「关联演出开始时间」（HH:mm），忽略并视为未完成。
+     */
+    private fun parseCompletedColumn(raw: String): Boolean {
+        val value = raw.trim()
+        if (value.isEmpty()) return false
+        if (TimeFormat.parseHm(value) != null) return false
+        return value == COMPLETED_CSV_YES ||
+            value == "已完成" ||
+            value == "1" ||
+            value.equals("true", ignoreCase = true)
     }
 
     fun parseDayKey(text: String): String? {

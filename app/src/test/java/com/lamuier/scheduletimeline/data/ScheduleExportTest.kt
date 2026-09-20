@@ -32,10 +32,10 @@ class ScheduleExportTest {
         )
         val csv = ScheduleExport.toCsv(listOf(perf, tokuten))
         assertTrue(csv.startsWith(ScheduleExport.IMPORT_HEADER))
-        assertTrue(csv.contains("2026-07-12, StarDiary, 演出, , , , 14:20, 14:40, "))
+        assertTrue(csv.contains("2026-07-12, StarDiary, 演出, , , , 14:20, 14:40, , "))
         assertTrue(
             csv.contains(
-                "2026-07-12, StarDiary / 银烁花火, 特典, 平特, , 酒馆A, 14:00, 15:00, 无",
+                "2026-07-12, StarDiary / 银烁花火, 特典, 平特, , 酒馆A, 14:00, 15:00, 无, ",
             ),
         )
     }
@@ -65,7 +65,7 @@ class ScheduleExportTest {
         )
         val csv = ScheduleExport.toCsv(listOf(event))
         assertTrue(
-            csv.contains("2026-07-12, StarDiary, 演出, , 开场, \"A厅, B区\", 14:20, 14:40, \"带\"\"引号\"\"\""),
+            csv.contains("2026-07-12, StarDiary, 演出, , 开场, \"A厅, B区\", 14:20, 14:40, \"带\"\"引号\"\"\", "),
         )
     }
 
@@ -91,6 +91,7 @@ class ScheduleExportTest {
         assertEquals("A厅, B区", events[0].location)
         assertEquals("带\"引号\"、逗号，和\n换行", events[0].note)
         assertEquals("2026-07-12", events[0].dayKey)
+        assertFalse(events[0].completed)
     }
 
     @Test
@@ -123,6 +124,42 @@ class ScheduleExportTest {
         assertEquals(1, drafts.size)
         assertEquals("StarDiary", drafts.single().event.team)
         assertNull(drafts.single().event.linkedPerformanceId)
+        assertFalse(drafts.single().event.completed)
+    }
+
+    @Test
+    fun parseImport_readsCompletedFlagForTokuten() {
+        val events = ScheduleExport.parseImport(
+            "2026-06-01, StarDiary, 特典, 平特, , 吧台A, 17:00, 19:00, , 是",
+        )
+        assertEquals(1, events.size)
+        assertTrue(events.single().completed)
+    }
+
+    @Test
+    fun toCsv_roundTripsCompletedTokuten() {
+        val original = ScheduleEvent(
+            id = 2,
+            team = "StarDiary",
+            eventType = EventType.TOKUTEN.storage,
+            tokutenKind = TokutenKind.PARALLEL.storage,
+            startMinutes = 17 * 60,
+            endMinutes = 19 * 60,
+            dayKey = "2026-06-01",
+            completed = true,
+        )
+        val events = ScheduleExport.parseImport(ScheduleExport.toCsv(listOf(original)))
+        assertEquals(1, events.size)
+        assertTrue(events.single().completed)
+    }
+
+    @Test
+    fun parseImport_completedFlagIgnoredForPerformance() {
+        val events = ScheduleExport.parseImport(
+            "2026-06-01, StarDiary, 演出, , , 主舞台, 14:20, 14:40, , 是",
+        )
+        assertEquals(1, events.size)
+        assertFalse(events.single().completed)
     }
 
     @Test

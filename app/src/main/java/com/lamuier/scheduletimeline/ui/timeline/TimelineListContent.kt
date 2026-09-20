@@ -52,7 +52,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import android.util.Log
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -231,11 +230,20 @@ private fun itemTimeRange(item: TimelineItem): Pair<Int, Int> = when (item) {
     is TimelineItem.Gap -> item.startMinutes to item.endMinutes
 }
 
+/** 已完成特典不再作为「现在」落点，与通知/状态条把完成项视为不存在一致。 */
+private fun itemCoversLiveNow(item: TimelineItem, now: Int): Boolean = when (item) {
+    is TimelineItem.Event ->
+        !item.event.completed && now in item.event.startMinutes until item.event.endMinutes
+    is TimelineItem.OverlapGroup ->
+        item.events.any {
+            !it.event.completed && now in it.event.startMinutes until it.event.endMinutes
+        }
+    is TimelineItem.Gap ->
+        now in item.startMinutes until item.endMinutes
+}
+
 private fun nowContainingItemKey(items: List<TimelineItem>, now: Int): String? {
-    val index = items.indices.firstOrNull { i ->
-        val (start, end) = itemTimeRange(items[i])
-        now in start until end
-    } ?: return null
+    val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return null
     return when (val item = items[index]) {
         is TimelineItem.Event -> "e-${item.event.id}"
         is TimelineItem.OverlapGroup ->
@@ -250,10 +258,7 @@ private suspend fun centerNowLine(
     now: Int,
     bottomPadPx: Int,
 ) {
-    val index = items.indices.firstOrNull { i ->
-        val (start, end) = itemTimeRange(items[i])
-        now in start until end
-    } ?: return
+    val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return
 
     listState.scrollToItem(index)
     val placed = withTimeoutOrNull(750) {
@@ -289,16 +294,12 @@ private fun nowJumpDirection(
     val nowY = computeNowY(listState, items, now, bottomPadPx)
     if (viewport > 0 && nowY != null && nowY >= 0f && nowY <= viewport) return null
 
-    val index = items.indices.firstOrNull { i ->
-        val (start, end) = itemTimeRange(items[i])
-        now in start until end
-    } ?: return null
+    val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return null
     val direction = if (nowY != null) {
         if (nowY < 0f) NowJumpDirection.Up else NowJumpDirection.Down
     } else {
         if (index < visible.first().index) NowJumpDirection.Up else NowJumpDirection.Down
     }
-    Log.d("TimelineNowLine", "jumpDirection=$direction nowY=$nowY index=$index firstVisible=${visible.firstOrNull()?.index}")
     return direction
 }
 
@@ -320,21 +321,13 @@ private fun computeNowY(
     val viewportStart = layoutInfo.viewportStartOffset
     for (info in layoutInfo.visibleItemsInfo) {
         val item = items.getOrNull(info.index) ?: continue
+        if (!itemCoversLiveNow(item, now)) continue
         val (start, end) = itemTimeRange(item)
-        if (now in start until end) {
-            val span = (end - start).coerceAtLeast(1)
-            val frac = (now - start).toFloat() / span
-            val contentHeight = (info.size - bottomPadPx).coerceAtLeast(1)
-            val itemTopInViewport = info.offset - viewportStart
-            val nowY = itemTopInViewport + frac * contentHeight
-            Log.d(
-                "TimelineNowLine",
-                "idx=${info.index} start=$start end=$end " +
-                    "offset=${info.offset} viewportStart=$viewportStart " +
-                    "contentH=$contentHeight frac=$frac nowY=$nowY",
-            )
-            return nowY
-        }
+        val span = (end - start).coerceAtLeast(1)
+        val frac = (now - start).toFloat() / span
+        val contentHeight = (info.size - bottomPadPx).coerceAtLeast(1)
+        val itemTopInViewport = info.offset - viewportStart
+        return itemTopInViewport + frac * contentHeight
     }
     return null
 }
@@ -512,7 +505,7 @@ private fun EventCard(
     val cardContainer = colors.accent.copy(alpha = if (dark) 0.18f else 0.12f)
 
     val inProgress = isEventInProgress(event, nowMinutes)
-    val blinkAlpha = rememberBlinkAlpha(enabled = inProgress)
+    val blinkAlpha = if (inProgress) rememberBlinkAlpha() else 1f
     val cardAlpha = if (event.completed) 0.62f else 1f
 
     Card(
@@ -615,7 +608,7 @@ private fun isEventInProgress(event: ScheduleEvent, nowMinutes: Int?): Boolean =
         nowMinutes in event.startMinutes until event.endMinutes
 
 @Composable
-private fun rememberBlinkAlpha(enabled: Boolean): Float {
+private fun rememberBlinkAlpha(): Float {
     val infinite = rememberInfiniteTransition(label = "event-border-blink")
     val alpha by infinite.animateFloat(
         initialValue = 0.28f,
@@ -626,7 +619,7 @@ private fun rememberBlinkAlpha(enabled: Boolean): Float {
         ),
         label = "border-alpha",
     )
-    return if (enabled) alpha else 1f
+    return alpha
 }
 
 @Composable

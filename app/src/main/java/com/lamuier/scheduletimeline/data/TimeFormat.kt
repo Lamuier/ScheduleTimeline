@@ -8,7 +8,7 @@ object TimeFormat {
         val normalized = ((totalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60)
         val h = normalized / 60
         val m = normalized % 60
-        return String.format(Locale.getDefault(), "%02d:%02d", h, m)
+        return String.format(Locale.ROOT, "%02d:%02d", h, m)
     }
 
     fun rangeLabel(startMinutes: Int, endMinutes: Int): String {

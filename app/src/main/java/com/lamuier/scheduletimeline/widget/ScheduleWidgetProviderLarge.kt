@@ -22,7 +22,10 @@ class ScheduleWidgetProviderLarge : AppWidgetProvider() {
     }
 
     companion object {
-        /** 列表项 fillInIntent 携带的事件 id（预留后续点击直达编辑页）。 */
+        /** 列表项 fillInIntent 携带的事件 id，点击直达对应编辑页。 */
         const val EXTRA_ITEM_EVENT_ID = "extra_widget_item_event_id"
+
+        /** 4×3 列表模板专用 action，避免与根布局「打开主界面」PendingIntent 合并。 */
+        const val ACTION_WIDGET_ITEM = "com.lamuier.scheduletimeline.action.WIDGET_ITEM"
     }
 }

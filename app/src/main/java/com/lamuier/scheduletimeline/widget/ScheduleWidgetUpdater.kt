@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.view.View
 import android.widget.RemoteViews
 import com.lamuier.scheduletimeline.MainActivity
@@ -28,6 +29,9 @@ import java.util.Locale
  * 颜色走 `res/values[-night]/widget_colors.xml`，由系统按夜间模式自动选择。
  */
 object ScheduleWidgetUpdater {
+
+    private const val OPEN_APP_REQUEST_CODE = 0
+    private const val LIST_ITEM_TEMPLATE_REQUEST_CODE = 4201
 
     suspend fun refreshAll(context: Context) {
         val appContext = context.applicationContext
@@ -76,9 +80,33 @@ object ScheduleWidgetUpdater {
         }
         return PendingIntent.getActivity(
             context,
-            0,
+            OPEN_APP_REQUEST_CODE,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /**
+     * 4×3 列表点击模板：必须可变，否则 Android 12+ 不会把
+     * [RemoteViews.setOnClickFillInIntent] 的事件 id 合并进启动 Intent。
+     */
+    private fun listItemTemplateIntent(context: Context): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = ScheduleWidgetProviderLarge.ACTION_WIDGET_ITEM
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val mutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_MUTABLE
+        } else {
+            0
+        }
+        return PendingIntent.getActivity(
+            context,
+            LIST_ITEM_TEMPLATE_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or mutable,
         )
     }
 
@@ -255,8 +283,7 @@ object ScheduleWidgetUpdater {
         // RemoteViewsService 提供列表数据
         val listIntent = Intent(context, ScheduleWidgetService::class.java)
         views.setRemoteAdapter(R.id.widget_list, listIntent)
-        // 列表项点击模板：合并 service 的 fillInIntent 后启动 MainActivity
-        views.setPendingIntentTemplate(R.id.widget_list, openAppIntent(context))
+        views.setPendingIntentTemplate(R.id.widget_list, listItemTemplateIntent(context))
 
         views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(context))
         return views
