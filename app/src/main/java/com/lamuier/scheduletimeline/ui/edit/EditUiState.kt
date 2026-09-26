@@ -22,8 +22,15 @@ data class EditUiState(
     val isNew: Boolean = true,
 ) {
     fun effectiveTeamNames(): List<String> {
-        val normalized = TeamNames.normalize(teamNames + TeamNames.parseInput(teamInput))
-        return if (eventType == EventType.PERFORMANCE) normalized.takeLast(1) else normalized
+        val pending = TeamNames.parseInput(teamInput)
+        val selected = TeamNames.normalize(teamNames)
+        // 演出手动输入仍只保留最后一项。已选中的多个团队（同时段自动合并的结果）
+        // 在没有新输入时原样保存，避免打开编辑页再保存时丢掉其余团队。
+        return if (eventType == EventType.PERFORMANCE && pending.isNotEmpty()) {
+            listOf(pending.last())
+        } else {
+            TeamNames.normalize(selected + pending)
+        }
     }
 }
 

@@ -71,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -81,6 +82,8 @@ import androidx.compose.ui.unit.sp
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
 import com.lamuier.scheduletimeline.data.EventType
+import com.lamuier.scheduletimeline.data.LanePlacement
+import com.lamuier.scheduletimeline.data.LaneSegments
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.TimeFormat
 import com.lamuier.scheduletimeline.data.TimelineItem
@@ -88,6 +91,7 @@ import com.lamuier.scheduletimeline.data.TokutenKind
 import com.lamuier.scheduletimeline.data.sharesTeamWith
 import com.lamuier.scheduletimeline.data.teamDisplay
 import com.lamuier.scheduletimeline.ui.theme.LocalDarkTheme
+import com.lamuier.scheduletimeline.ui.theme.WarningAmber
 import com.lamuier.scheduletimeline.ui.theme.ScheduleTimelineTheme
 import com.lamuier.scheduletimeline.ui.theme.adaptTo
 import com.lamuier.scheduletimeline.ui.theme.eventTypeColors
@@ -496,15 +500,24 @@ private fun EventCard(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     fillHeight: Boolean = false,
+    // 并排分栏后单卡很窄，时间改成两行，避免和类型标挤在同一行里被截断。
+    narrow: Boolean = false,
+    // 切开后的非交叉段：只显示这一段自己的起止，不显示整场日程的完整时间。
+    displayStart: Int? = null,
+    displayEnd: Int? = null,
 ) {
     val event = item.event
+    val shownStart = displayStart ?: event.startMinutes
+    val shownEnd = displayEnd ?: event.endMinutes
     val dark = LocalDarkTheme.current
     val colors = remember(event.eventType, event.tokutenKind, dark) {
         eventTypeColors(event).adaptTo(dark)
     }
     val cardContainer = colors.accent.copy(alpha = if (dark) 0.18f else 0.12f)
 
-    val inProgress = isEventInProgress(event, nowMinutes)
+    val inProgress = nowMinutes != null &&
+        !event.completed &&
+        nowMinutes in shownStart until shownEnd
     val blinkAlpha = if (inProgress) rememberBlinkAlpha() else 1f
     val cardAlpha = if (event.completed) 0.62f else 1f
 
@@ -524,38 +537,62 @@ private fun EventCard(
         },
     ) {
             Column(
-                modifier = Modifier.padding(if (compact) 10.dp else 16.dp),
+                modifier = Modifier.padding(if (narrow) 8.dp else if (compact) 10.dp else 16.dp),
                 verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = TimeFormat.rangeLabel(event.startMinutes, event.endMinutes),
-                        color = colors.accent,
-                        style = if (compact) {
-                            MaterialTheme.typography.labelMedium
-                        } else {
-                            MaterialTheme.typography.labelLarge
-                        },
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TypeMarkBadge(
-                        event = event,
-                        size = if (compact) 20.dp else 24.dp,
-                        textSize = if (compact) 10.sp else 12.sp,
-                    )
-                    if (event.completed) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
+                if (narrow) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = stringResource(R.string.event_completed),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                text = TimeFormat.minutesToHm(shownStart),
+                                color = colors.accent,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
+                            Text(
+                                text = "~ ${TimeFormat.minutesToHm(shownEnd)}",
+                                color = colors.accent,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = TimeFormat.rangeLabel(shownStart, shownEnd),
+                            color = colors.accent,
+                            style = if (compact) {
+                                MaterialTheme.typography.labelMedium
+                            } else {
+                                MaterialTheme.typography.labelLarge
+                            },
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TypeMarkBadge(
+                            event = event,
+                            size = if (compact) 20.dp else 24.dp,
+                            textSize = if (compact) 10.sp else 12.sp,
+                        )
+                        if (event.completed) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.event_completed),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -571,13 +608,25 @@ private fun EventCard(
                     },
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
+                    maxLines = if (narrow) 2 else Int.MAX_VALUE,
+                    overflow = if (narrow) TextOverflow.Ellipsis else TextOverflow.Clip,
                 )
+                if (narrow && event.completed) {
+                    Text(
+                        text = stringResource(R.string.event_completed),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
 
                 if (event.title.isNotBlank() && event.teamDisplay.isNotBlank()) {
                     Text(
                         text = event.title,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (narrow) 1 else Int.MAX_VALUE,
+                        overflow = if (narrow) TextOverflow.Ellipsis else TextOverflow.Clip,
                     )
                 }
             }
@@ -651,8 +700,17 @@ private fun ParallelEventCards(
             nowMinutes = nowMinutes,
             onSelectEvent = onSelectEvent,
             modifier = Modifier.weight(1f),
+            overlapMode = LaneOverlapMode.Segments,
         )
     }
+}
+
+private enum class LaneOverlapMode {
+    /** 演出列：彼此重叠时并排，避免卡片盖住点击。 */
+    Columns,
+
+    /** 特典列：不并排。只有重叠的那一段时间单独成块，前后仍是各自的卡片。 */
+    Segments,
 }
 
 @Composable
@@ -664,6 +722,7 @@ private fun EventLane(
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
+    overlapMode: LaneOverlapMode = LaneOverlapMode.Columns,
 ) {
     val laneMinutes = (groupEnd - groupStart).coerceAtLeast(1)
     // 理想比例尺下若轨道超过上限，则等比缩小比例尺，整组封顶在 MAX 高度内。
@@ -683,30 +742,163 @@ private fun EventLane(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 4.dp),
         )
-        // 轨道高度等于组的时长跨度；卡片按真实起止时间绝对定位，
-        // 高度 = 时长 × 比例尺（并保底最小可读高度）。
-        Box(
+        // 轨道高度等于组的时长跨度。特典有重叠时按时间片切开，只把重叠段做成一块；
+        // 没有重叠时（以及演出列）仍按整张卡片定位，高度 = 时长 × 比例尺。
+        val ranges = items.map { it.event.startMinutes to it.event.endMinutes }
+        val segments = if (overlapMode == LaneOverlapMode.Segments) LaneSegments.slice(ranges) else emptyList()
+        if (segments.any { it is LaneSegments.Segment.Overlap }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(laneHeight)
+                    .clipToBounds(),
+            ) {
+                segments.forEach { segment ->
+                    val segmentOffset = ((segment.startMinutes - groupStart) * scale).dp
+                    val segmentHeight =
+                        ((segment.endMinutes - segment.startMinutes).coerceAtLeast(1) * scale).dp
+                    val segmentModifier = Modifier
+                        .offset(y = segmentOffset)
+                        .fillMaxWidth()
+                        .height(segmentHeight)
+                        .padding(bottom = PARALLEL_CARD_GAP)
+                    when (segment) {
+                        is LaneSegments.Segment.Single -> EventCard(
+                            item = items[segment.index],
+                            nowMinutes = nowMinutes,
+                            onClick = { onSelectEvent(items[segment.index]) },
+                            compact = true,
+                            fillHeight = true,
+                            displayStart = segment.startMinutes,
+                            displayEnd = segment.endMinutes,
+                            modifier = segmentModifier,
+                        )
+                        is LaneSegments.Segment.Overlap -> OverlapSlice(
+                            items = segment.indices.map { items[it] },
+                            startMinutes = segment.startMinutes,
+                            endMinutes = segment.endMinutes,
+                            nowMinutes = nowMinutes,
+                            onSelectEvent = onSelectEvent,
+                            modifier = segmentModifier,
+                        )
+                    }
+                }
+            }
+        } else {
+            val placements = LanePlacement.place(ranges)
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(laneHeight)
+                    .clipToBounds(),
+            ) {
+                val columnCount = placements.firstOrNull()?.columnCount ?: 1
+                val columnGap = if (columnCount > 1) PARALLEL_CARD_GAP else 0.dp
+                val columnWidth = (maxWidth - columnGap * (columnCount - 1)) / columnCount
+                items.forEachIndexed { index, item ->
+                    val event = item.event
+                    val slot = placements[index]
+                    val cardOffset = ((event.startMinutes - groupStart) * scale).dp
+                    val timeHeight = ((event.endMinutes - event.startMinutes).coerceAtLeast(1) * scale).dp
+                    val cardHeight = timeHeight.coerceAtLeast(PARALLEL_MIN_CARD_HEIGHT)
+                    val cardWidth = columnWidth * slot.span + columnGap * (slot.span - 1)
+                    EventCard(
+                        item = item,
+                        nowMinutes = nowMinutes,
+                        onClick = { onSelectEvent(item) },
+                        compact = true,
+                        fillHeight = true,
+                        narrow = columnCount > 1 && slot.span < columnCount,
+                        modifier = Modifier
+                            .offset(x = (columnWidth + columnGap) * slot.column, y = cardOffset)
+                            .width(cardWidth)
+                            .height(cardHeight)
+                            .padding(bottom = PARALLEL_CARD_GAP),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OverlapSlice(
+    items: List<TimelineItem.Event>,
+    startMinutes: Int,
+    endMinutes: Int,
+    nowMinutes: Int?,
+    onSelectEvent: (TimelineItem.Event) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val dark = LocalDarkTheme.current
+    val inProgress = nowMinutes != null &&
+        nowMinutes in startMinutes until endMinutes &&
+        items.any { isEventInProgress(it.event, nowMinutes) }
+    val blinkAlpha = if (inProgress) rememberBlinkAlpha() else 1f
+    val borderColor = if (inProgress) {
+        ProgressRed.copy(alpha = blinkAlpha)
+    } else {
+        WarningAmber.copy(alpha = if (dark) 0.85f else 1f)
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clipToBounds(),
+        shape = RoundedCornerShape(16.dp),
+        color = WarningAmber.copy(alpha = if (dark) 0.16f else 0.12f),
+        border = BorderStroke(if (inProgress) 2.dp else 1.dp, borderColor),
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(laneHeight)
-                .clipToBounds(),
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            Text(
+                text = TimeFormat.minutesToHm(startMinutes),
+                style = MaterialTheme.typography.labelMedium,
+                color = WarningAmber,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+            Text(
+                text = "~ ${TimeFormat.minutesToHm(endMinutes)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = WarningAmber,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
             items.forEach { item ->
                 val event = item.event
-                val cardOffset = ((event.startMinutes - groupStart) * scale).dp
-                val timeHeight = ((event.endMinutes - event.startMinutes).coerceAtLeast(1) * scale).dp
-                val cardHeight = timeHeight.coerceAtLeast(PARALLEL_MIN_CARD_HEIGHT)
-                EventCard(
-                    item = item,
-                    nowMinutes = nowMinutes,
+                val colors = eventTypeColors(event).adaptTo(dark)
+                val cardAlpha = if (event.completed) 0.62f else 1f
+                Surface(
                     onClick = { onSelectEvent(item) },
-                    compact = true,
-                    fillHeight = true,
-                    modifier = Modifier
-                        .offset(y = cardOffset)
-                        .height(cardHeight)
-                        .padding(bottom = PARALLEL_CARD_GAP),
-                )
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.container.copy(alpha = colors.container.alpha * cardAlpha),
+                    contentColor = colors.onContainer,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = event.teamDisplay.ifBlank { event.title }.ifBlank {
+                                stringResource(R.string.event_untitled)
+                            },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
+                    }
+                }
             }
         }
     }

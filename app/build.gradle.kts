@@ -28,8 +28,8 @@ android {
         applicationId = "com.lamuier.scheduletimeline"
         minSdk = 26
         targetSdk = 37
-        versionCode = 24
-        versionName = "1.11.3"
+        versionCode = 25
+        versionName = "1.12.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }

@@ -34,6 +34,9 @@ interface ScheduleEventDao {
     @Query("DELETE FROM schedule_events WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM schedule_events WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>)
+
     @Query("UPDATE schedule_events SET category = '' WHERE category = :name")
     suspend fun clearCategory(name: String)
 

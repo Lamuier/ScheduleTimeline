@@ -18,6 +18,16 @@ class EditUiStateTest {
     }
 
     @Test
+    fun performanceEffectiveTeams_keepsMergedSelectionWhenInputIsBlank() {
+        val state = EditUiState(
+            eventType = EventType.PERFORMANCE,
+            teamNames = listOf("StarDiary", "空色轨迹"),
+        )
+
+        assertEquals(listOf("StarDiary", "空色轨迹"), state.effectiveTeamNames())
+    }
+
+    @Test
     fun performanceEffectiveTeams_keepsOnlyLatestPendingName() {
         val state = EditUiState(
             eventType = EventType.PERFORMANCE,

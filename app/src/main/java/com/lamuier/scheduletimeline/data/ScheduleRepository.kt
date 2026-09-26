@@ -2,6 +2,10 @@ package com.lamuier.scheduletimeline.data
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
@@ -10,7 +14,14 @@ class ScheduleRepository(
     private val eventDao: ScheduleEventDao = database.scheduleEventDao(),
     private val categoryDao: CategoryDao = database.categoryDao(),
 ) {
-    fun observeDay(dayKey: String): Flow<List<ScheduleEvent>> = eventDao.observeByDay(dayKey)
+    @Volatile
+    private var scheduleReady = false
+    private val readyMutex = Mutex()
+
+    fun observeDay(dayKey: String): Flow<List<ScheduleEvent>> = flow {
+        ensureScheduleReady()
+        emitAll(eventDao.observeByDay(dayKey))
+    }
 
     fun observeCategories(): Flow<List<Category>> = categoryDao.observeAll()
 
@@ -39,12 +50,18 @@ class ScheduleRepository(
         return database.withTransaction {
             val normalized = normalizeEvent(event)
             saveTeamCategories(listOf(normalized))
-            if (normalized.id == 0L) {
+            val id = if (normalized.id == 0L) {
                 eventDao.upsert(normalized)
             } else {
                 eventDao.update(normalized)
                 normalized.id
             }
+            val saved = eventDao.getById(id) ?: normalized.copy(id = id)
+            applyMerge(eventDao.getByDay(saved.dayKey))
+            eventDao.getByDay(saved.dayKey)
+                .firstOrNull { EventMerge.slotOf(it) == EventMerge.slotOf(saved) }
+                ?.id
+                ?: id
         }
     }
 
@@ -54,16 +71,18 @@ class ScheduleRepository(
             val normalized = events.map(::normalizeEvent)
             saveTeamCategories(normalized)
             eventDao.upsertAll(normalized)
+            mergeDays(normalized.map { it.dayKey })
         }
     }
 
-    /** 导入草稿；演出 / 特典关联由同日团队名称交集自动计算。 */
+    /** 导入草稿；同日同时段同类型会合并成一条，演出 / 特典关联仍按团队名称计算。 */
     suspend fun importDrafts(drafts: List<ImportDraft>) {
         if (drafts.isEmpty()) return
         database.withTransaction {
             val events = drafts.map { normalizeEvent(it.event.copy(id = 0)) }
             saveTeamCategories(events)
             eventDao.upsertAll(events)
+            mergeDays(events.map { it.dayKey })
         }
     }
 
@@ -101,9 +120,15 @@ class ScheduleRepository(
         }
     }
 
-    suspend fun eventsForDay(dayKey: String): List<ScheduleEvent> = eventDao.getByDay(dayKey)
+    suspend fun eventsForDay(dayKey: String): List<ScheduleEvent> {
+        ensureScheduleReady()
+        return eventDao.getByDay(dayKey)
+    }
 
-    suspend fun allEvents(): List<ScheduleEvent> = eventDao.getAll()
+    suspend fun allEvents(): List<ScheduleEvent> {
+        ensureScheduleReady()
+        return eventDao.getAll()
+    }
 
     suspend fun distinctDayKeys(): List<String> = eventDao.distinctDayKeys()
 
@@ -111,10 +136,43 @@ class ScheduleRepository(
     suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String? =
         eventDao.firstDayKeyOnOrAfter(fromDayKey)
 
-    /** 仅做 dayKey 遗留迁移；不写入样例日程。 */
+    /**
+     * 遗留 dayKey 迁移，并合并已有的同时段同类型日程。
+     * 时间轴、小组件和通知读数据前都会走到这里，避免先画出拆开的卡片。
+     */
     suspend fun seedIfEmpty() {
-        val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-        eventDao.reassignDayKey("default", today)
+        ensureScheduleReady()
+    }
+
+    private suspend fun ensureScheduleReady() {
+        if (scheduleReady) return
+        readyMutex.withLock {
+            if (scheduleReady) return@withLock
+            database.withTransaction {
+                val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                eventDao.reassignDayKey("default", today)
+                applyMerge(eventDao.getAll())
+            }
+            scheduleReady = true
+        }
+    }
+
+    private suspend fun mergeDays(dayKeys: Collection<String>) {
+        dayKeys.distinct().forEach { dayKey ->
+            applyMerge(eventDao.getByDay(dayKey))
+        }
+    }
+
+    private suspend fun applyMerge(events: List<ScheduleEvent>) {
+        val plan = EventMerge.plan(events)
+        if (plan.updates.isNotEmpty()) {
+            saveTeamCategories(plan.updates)
+            eventDao.updateAll(plan.updates)
+        }
+        if (plan.deleteIds.isNotEmpty()) {
+            eventDao.clearLinkedPerformances(plan.deleteIds)
+            eventDao.deleteByIds(plan.deleteIds)
+        }
     }
 
     private fun normalizeEvent(event: ScheduleEvent): ScheduleEvent = event.copy(
