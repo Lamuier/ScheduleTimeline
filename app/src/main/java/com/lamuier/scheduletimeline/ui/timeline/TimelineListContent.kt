@@ -83,6 +83,7 @@ import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
 import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.LanePlacement
+import com.lamuier.scheduletimeline.data.LaneScale
 import com.lamuier.scheduletimeline.data.LaneSegments
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.TimeFormat
@@ -500,8 +501,9 @@ private fun EventCard(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     fillHeight: Boolean = false,
-    // 并排分栏后单卡很窄，时间改成两行，避免和类型标挤在同一行里被截断。
+    // 半宽轨道里单卡放不下一行「时间 + 类型标」，时间拆成两行，避免被挤成「14:3 / 0」。
     narrow: Boolean = false,
+    titleMaxLines: Int = 1,
     // 切开后的非交叉段：只显示这一段自己的起止，不显示整场日程的完整时间。
     displayStart: Int? = null,
     displayEnd: Int? = null,
@@ -549,6 +551,7 @@ private fun EventCard(
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
@@ -557,6 +560,7 @@ private fun EventCard(
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -574,6 +578,9 @@ private fun EventCard(
                             },
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         TypeMarkBadge(
                             event = event,
@@ -608,7 +615,7 @@ private fun EventCard(
                     },
                     color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
-                    maxLines = if (narrow) 2 else Int.MAX_VALUE,
+                    maxLines = if (narrow) titleMaxLines.coerceIn(1, LaneScale.MAX_TITLE_LINES) else Int.MAX_VALUE,
                     overflow = if (narrow) TextOverflow.Ellipsis else TextOverflow.Clip,
                 )
                 if (narrow && event.completed) {
@@ -617,6 +624,8 @@ private fun EventCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
 
@@ -633,20 +642,8 @@ private fun EventCard(
         }
 }
 
-/**
- * 并行组内每条时间轨道的理想比例尺：每分钟对应的像素高度。
- * 让卡片高度真正反映事件时长，而不是由内容多寡决定。
- */
-private const val PARALLEL_PX_PER_MINUTE = 4
-
-/** 轨道高度上限：超过后自动缩小比例尺，保证整组仍能在一屏内放下。 */
-private val PARALLEL_MAX_LANE_HEIGHT = 600.dp
-
-/** 卡片最小可读高度：保证时间、团队、类型至少可见。 */
-private val PARALLEL_MIN_CARD_HEIGHT = 96.dp
-
 /** 并行轨道内相邻卡片之间的视觉间隙，避免时间连续的卡片贴在一起像一块。 */
-private val PARALLEL_CARD_GAP = 4.dp
+private val PARALLEL_CARD_GAP = LaneScale.CARD_GAP_DP.dp
 
 /** 当前时间轴 / 进行中边框闪烁颜色。 */
 private val ProgressRed = Color(0xFFE53935)
@@ -678,6 +675,23 @@ private fun ParallelEventCards(
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
+    val fontScale = LocalDensity.current.fontScale
+    val laneMinutes = (group.endMinutes - group.startMinutes).coerceAtLeast(1)
+    val tokutenSegments = LaneSegments.slice(
+        group.tokutenEvents.map { it.event.startMinutes to it.event.endMinutes },
+    )
+    val tokutenOverlaps = tokutenSegments.any { it is LaneSegments.Segment.Overlap }
+    val blocks = buildList {
+        group.performanceEvents.forEach { add(it.event.toLaneBlock()) }
+        if (tokutenOverlaps) {
+            tokutenSegments.forEach { add(it.toLaneBlock(group.tokutenEvents)) }
+        } else {
+            group.tokutenEvents.forEach { add(it.event.toLaneBlock()) }
+        }
+    }
+    // 左右列共用比例尺：短的特典段也会把整组抬高，时间仍然对齐，文字不再被裁掉。
+    val scale = LaneScale.resolve(laneMinutes, blocks, fontScale)
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -690,6 +704,8 @@ private fun ParallelEventCards(
             groupEnd = group.endMinutes,
             nowMinutes = nowMinutes,
             onSelectEvent = onSelectEvent,
+            scale = scale,
+            fontScale = fontScale,
             modifier = Modifier.weight(1f),
         )
         EventLane(
@@ -699,10 +715,47 @@ private fun ParallelEventCards(
             groupEnd = group.endMinutes,
             nowMinutes = nowMinutes,
             onSelectEvent = onSelectEvent,
+            scale = scale,
+            fontScale = fontScale,
             modifier = Modifier.weight(1f),
             overlapMode = LaneOverlapMode.Segments,
         )
     }
+}
+
+private fun ScheduleEvent.toLaneBlock(minutes: Int = endMinutes - startMinutes): LaneScale.Block =
+    LaneScale.Block(
+        minutes = minutes.coerceAtLeast(1),
+        minHeightDp = LaneScale.singleSlotDp(
+            completed = completed,
+            hasSubtitle = title.isNotBlank() && teamDisplay.isNotBlank(),
+        ),
+    )
+
+private fun LaneSegments.Segment.toLaneBlock(items: List<TimelineItem.Event>): LaneScale.Block {
+    val minutes = (endMinutes - startMinutes).coerceAtLeast(1)
+    return when (this) {
+        is LaneSegments.Segment.Single -> items[index].event.toLaneBlock(minutes)
+        is LaneSegments.Segment.Overlap -> LaneScale.Block(
+            minutes = minutes,
+            minHeightDp = LaneScale.overlapSlotDp(indices.size),
+        )
+    }
+}
+
+private fun laneTitleLines(
+    event: ScheduleEvent,
+    slotMinutes: Int,
+    scale: Float,
+    fontScale: Float,
+): Int {
+    val cardInner = slotMinutes.coerceAtLeast(1) * scale - LaneScale.CARD_GAP_DP
+    return LaneScale.titleLinesThatFit(
+        cardInnerDp = cardInner,
+        completed = event.completed,
+        hasSubtitle = event.title.isNotBlank() && event.teamDisplay.isNotBlank(),
+        fontScale = fontScale,
+    )
 }
 
 private enum class LaneOverlapMode {
@@ -721,15 +774,12 @@ private fun EventLane(
     groupEnd: Int,
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
+    scale: Float,
+    fontScale: Float,
     modifier: Modifier = Modifier,
     overlapMode: LaneOverlapMode = LaneOverlapMode.Columns,
 ) {
     val laneMinutes = (groupEnd - groupStart).coerceAtLeast(1)
-    // 理想比例尺下若轨道超过上限，则等比缩小比例尺，整组封顶在 MAX 高度内。
-    val scale = minOf(
-        PARALLEL_PX_PER_MINUTE.toFloat(),
-        (PARALLEL_MAX_LANE_HEIGHT / laneMinutes).value,
-    )
     val laneHeight = (laneMinutes * scale).dp
 
     Column(
@@ -769,6 +819,13 @@ private fun EventLane(
                             onClick = { onSelectEvent(items[segment.index]) },
                             compact = true,
                             fillHeight = true,
+                            narrow = true,
+                            titleMaxLines = laneTitleLines(
+                                event = items[segment.index].event,
+                                slotMinutes = segment.endMinutes - segment.startMinutes,
+                                scale = scale,
+                                fontScale = fontScale,
+                            ),
                             displayStart = segment.startMinutes,
                             displayEnd = segment.endMinutes,
                             modifier = segmentModifier,
@@ -799,8 +856,8 @@ private fun EventLane(
                     val event = item.event
                     val slot = placements[index]
                     val cardOffset = ((event.startMinutes - groupStart) * scale).dp
-                    val timeHeight = ((event.endMinutes - event.startMinutes).coerceAtLeast(1) * scale).dp
-                    val cardHeight = timeHeight.coerceAtLeast(PARALLEL_MIN_CARD_HEIGHT)
+                    val slotMinutes = (event.endMinutes - event.startMinutes).coerceAtLeast(1)
+                    val cardHeight = (slotMinutes * scale).dp
                     val cardWidth = columnWidth * slot.span + columnGap * (slot.span - 1)
                     EventCard(
                         item = item,
@@ -808,7 +865,9 @@ private fun EventLane(
                         onClick = { onSelectEvent(item) },
                         compact = true,
                         fillHeight = true,
-                        narrow = columnCount > 1 && slot.span < columnCount,
+                        // 每一列都只有并排区域的一半宽，时间必须拆行，不能和类型标、完成标记挤在一起。
+                        narrow = true,
+                        titleMaxLines = laneTitleLines(event, slotMinutes, scale, fontScale),
                         modifier = Modifier
                             .offset(x = (columnWidth + columnGap) * slot.column, y = cardOffset)
                             .width(cardWidth)
@@ -862,6 +921,8 @@ private fun OverlapSlice(
                 color = WarningAmber,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "~ ${TimeFormat.minutesToHm(endMinutes)}",
@@ -869,6 +930,8 @@ private fun OverlapSlice(
                 color = WarningAmber,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
             items.forEach { item ->
                 val event = item.event
@@ -894,6 +957,7 @@ private fun OverlapSlice(
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
