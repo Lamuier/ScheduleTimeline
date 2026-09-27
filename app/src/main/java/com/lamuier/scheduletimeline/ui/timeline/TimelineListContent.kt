@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -85,6 +86,7 @@ import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.LanePlacement
 import com.lamuier.scheduletimeline.data.LaneScale
 import com.lamuier.scheduletimeline.data.LaneSegments
+import com.lamuier.scheduletimeline.data.NowLinePlacement
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.TimeFormat
 import com.lamuier.scheduletimeline.data.TimelineItem
@@ -122,22 +124,31 @@ internal fun TimelineList(
         // 有「现在」落点时上下各留半屏空白，才能把时间线滚到视口正中（含当天第一条/最后一条）。
         val extraPad = if (nowItemKey != null) maxHeight / 2 else 8.dp
         val bottomPad = extraPad.coerceAtLeast(80.dp)
-        val cardBottomPadPx = with(density) { 16.dp.roundToPx() }
+        val nowMetrics = with(density) {
+            val labelLinePx = 16.sp.toPx()
+            NowLineMetrics(
+                bottomPadPx = NowAxisBottomPad.toPx(),
+                labelLinePx = labelLinePx,
+                laneHeaderPx = labelLinePx + NowLaneLabelGap.toPx(),
+                fontScale = fontScale,
+                pxPerDp = this.density,
+            )
+        }
 
-        LaunchedEffect(nowItemKey, items, extraPad) {
+        LaunchedEffect(nowItemKey, items, extraPad, nowMetrics) {
             val now = nowMinutes
             if (now == null || nowItemKey == null || nowItemKey == lastCenteredKey) return@LaunchedEffect
-            centerNowLine(listState, items, now, cardBottomPadPx)
+            centerNowLine(listState, items, now, nowMetrics)
             lastCenteredKey = nowItemKey
         }
 
-        val jumpDirection by remember(items, nowMinutes, nowItemKey, cardBottomPadPx) {
+        val jumpDirection by remember(items, nowMinutes, nowItemKey, nowMetrics) {
             derivedStateOf {
                 val now = nowMinutes
                 if (now == null || nowItemKey == null || items.isEmpty()) {
                     null
                 } else {
-                    nowJumpDirection(listState, items, now, cardBottomPadPx)
+                    nowJumpDirection(listState, items, now, nowMetrics)
                 }
             }
         }
@@ -177,7 +188,25 @@ internal fun TimelineList(
                                 nowMinutes = nowMinutes,
                                 onSelectEvent = onSelectEvent,
                             )
-                            is TimelineItem.Gap -> GapCard(item = item, nowMinutes = nowMinutes)
+                            is TimelineItem.Gap -> {
+                                val live = nowMinutes != null &&
+                                    nowMinutes in item.startMinutes until item.endMinutes
+                                GapCard(
+                                    item = item,
+                                    nowMinutes = nowMinutes,
+                                    modifier = if (live) {
+                                        val labelLineDp = with(density) { 16.sp.toDp() }
+                                        Modifier.heightIn(
+                                            min = NowLinePlacement.liveGapContentMinDp(
+                                                item.endMinutes - item.startMinutes,
+                                                labelLineDp.value,
+                                            ).dp,
+                                        )
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -187,7 +216,7 @@ internal fun TimelineList(
             // 只在列表视口内绘制：item 部分滚出时插值 y 可能为负，Compose 默认不裁剪，
             // 会盖住上方的状态条 / 统计条（Column 后绘制的子项图层更高）。
             if (nowMinutes != null) {
-                val nowY = computeNowY(listState, items, nowMinutes, cardBottomPadPx)
+                val nowY = computeNowY(listState, items, nowMinutes, nowMetrics)
                 val viewportH = listState.layoutInfo.viewportEndOffset -
                     listState.layoutInfo.viewportStartOffset
                 if (nowY != null && viewportH > 0 && nowY in 0f..viewportH.toFloat()) {
@@ -203,7 +232,7 @@ internal fun TimelineList(
                     onClick = {
                         val now = nowMinutes ?: return@ExtendedFloatingActionButton
                         scope.launch {
-                            centerNowLine(listState, items, now, cardBottomPadPx)
+                            centerNowLine(listState, items, now, nowMetrics)
                             lastCenteredKey = nowItemKey
                         }
                     },
@@ -261,13 +290,13 @@ private suspend fun centerNowLine(
     listState: LazyListState,
     items: List<TimelineItem>,
     now: Int,
-    bottomPadPx: Int,
+    metrics: NowLineMetrics,
 ) {
     val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return
 
     listState.scrollToItem(index)
     val placed = withTimeoutOrNull(750) {
-        snapshotFlow { computeNowY(listState, items, now, bottomPadPx) }
+        snapshotFlow { computeNowY(listState, items, now, metrics) }
             .filterNotNull()
             .first()
     } ?: return
@@ -290,13 +319,13 @@ private fun nowJumpDirection(
     listState: LazyListState,
     items: List<TimelineItem>,
     now: Int,
-    bottomPadPx: Int,
+    metrics: NowLineMetrics,
 ): NowJumpDirection? {
     val visible = listState.layoutInfo.visibleItemsInfo
     if (visible.isEmpty()) return null
     val viewport = listState.layoutInfo.viewportEndOffset -
         listState.layoutInfo.viewportStartOffset
-    val nowY = computeNowY(listState, items, now, bottomPadPx)
+    val nowY = computeNowY(listState, items, now, metrics)
     if (viewport > 0 && nowY != null && nowY >= 0f && nowY <= viewport) return null
 
     val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return null
@@ -309,9 +338,26 @@ private fun nowJumpDirection(
 }
 
 /**
+ * 「现在」红线用到的布局度量。重叠组的列标题行高必须和 [EventLane] 里的标签一致。
+ */
+private data class NowLineMetrics(
+    val bottomPadPx: Float,
+    val labelLinePx: Float,
+    val laneHeaderPx: Float,
+    val fontScale: Float,
+    val pxPerDp: Float,
+)
+
+/** 时间轴节点底部留白，起始/结束时间标签靠这段留白上下分开。 */
+private val NowAxisBottomPad = 16.dp
+
+/** 重叠组列标题（演出 / 特典）行高，红线要跳过它才和轨道里的卡片对齐。 */
+private val NowLaneLabelGap = 4.dp
+
+/**
  * 根据 LazyListState 中可见 item 的实际视口位置，计算「现在」(now, 分钟) 在列表中的 y 像素。
- * 落在可见 item 时间范围内时，按其在「卡片区」(去掉内容区底部 [bottomPadPx] 留白) 内的时间占比插值；
- * 这样 now 线的起点/终点与左侧时间标签（卡片顶/底）严格对齐。当前时刻不可见时返回 null。
+ * 普通项落在左右时间标签中线之间；重叠组落在轨道盒子里，和卡片用同一比例尺。
+ * 当前时刻不可见时返回 null。
  *
  * 注意：info.offset 是 item 在列表内容坐标系中的偏移，需减去 viewportStartOffset 才得到
  * 相对于视口的 y；NowLine 与跳转按钮都使用视口坐标，因此这里统一做转换。
@@ -320,7 +366,7 @@ private fun computeNowY(
     listState: LazyListState,
     items: List<TimelineItem>,
     now: Int,
-    bottomPadPx: Int,
+    metrics: NowLineMetrics,
 ): Float? {
     val layoutInfo = listState.layoutInfo
     val viewportStart = layoutInfo.viewportStartOffset
@@ -330,9 +376,21 @@ private fun computeNowY(
         val (start, end) = itemTimeRange(item)
         val span = (end - start).coerceAtLeast(1)
         val frac = (now - start).toFloat() / span
-        val contentHeight = (info.size - bottomPadPx).coerceAtLeast(1)
-        val itemTopInViewport = info.offset - viewportStart
-        return itemTopInViewport + frac * contentHeight
+        val itemTopInViewport = (info.offset - viewportStart).toFloat()
+        val withinItem = when (item) {
+            is TimelineItem.OverlapGroup -> {
+                val scale = overlapGroupScale(item, metrics.fontScale)
+                val lanePx = span * scale * metrics.pxPerDp
+                NowLinePlacement.inOverlapLane(metrics.laneHeaderPx, lanePx, frac)
+            }
+            else -> NowLinePlacement.inItem(
+                itemHeightPx = info.size.toFloat(),
+                fraction = frac,
+                labelLinePx = metrics.labelLinePx,
+                bottomPadPx = metrics.bottomPadPx,
+            )
+        }
+        return itemTopInViewport + withinItem
     }
     return null
 }
@@ -427,7 +485,7 @@ private fun TimelineNode(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = NowAxisBottomPad),
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
@@ -448,7 +506,7 @@ private fun TimelineNode(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .padding(bottom = 16.dp),
+                .padding(bottom = NowAxisBottomPad),
         ) {
             content()
         }
@@ -676,21 +734,9 @@ private fun ParallelEventCards(
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
     val fontScale = LocalDensity.current.fontScale
-    val laneMinutes = (group.endMinutes - group.startMinutes).coerceAtLeast(1)
-    val tokutenSegments = LaneSegments.slice(
-        group.tokutenEvents.map { it.event.startMinutes to it.event.endMinutes },
-    )
-    val tokutenOverlaps = tokutenSegments.any { it is LaneSegments.Segment.Overlap }
-    val blocks = buildList {
-        group.performanceEvents.forEach { add(it.event.toLaneBlock()) }
-        if (tokutenOverlaps) {
-            tokutenSegments.forEach { add(it.toLaneBlock(group.tokutenEvents)) }
-        } else {
-            group.tokutenEvents.forEach { add(it.event.toLaneBlock()) }
-        }
-    }
     // 左右列共用比例尺：短的特典段也会把整组抬高，时间仍然对齐，文字不再被裁掉。
-    val scale = LaneScale.resolve(laneMinutes, blocks, fontScale)
+    // 红线用同一个 overlapGroupScale，避免和卡片各算各的。
+    val scale = overlapGroupScale(group, fontScale)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -721,6 +767,23 @@ private fun ParallelEventCards(
             overlapMode = LaneOverlapMode.Segments,
         )
     }
+}
+
+private fun overlapGroupScale(group: TimelineItem.OverlapGroup, fontScale: Float): Float {
+    val laneMinutes = (group.endMinutes - group.startMinutes).coerceAtLeast(1)
+    val tokutenSegments = LaneSegments.slice(
+        group.tokutenEvents.map { it.event.startMinutes to it.event.endMinutes },
+    )
+    val tokutenOverlaps = tokutenSegments.any { it is LaneSegments.Segment.Overlap }
+    val blocks = buildList {
+        group.performanceEvents.forEach { add(it.event.toLaneBlock()) }
+        if (tokutenOverlaps) {
+            tokutenSegments.forEach { add(it.toLaneBlock(group.tokutenEvents)) }
+        } else {
+            group.tokutenEvents.forEach { add(it.event.toLaneBlock()) }
+        }
+    }
+    return LaneScale.resolve(laneMinutes, blocks, fontScale)
 }
 
 private fun ScheduleEvent.toLaneBlock(minutes: Int = endMinutes - startMinutes): LaneScale.Block =
@@ -787,10 +850,12 @@ private fun EventLane(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 4.dp),
+            modifier = Modifier
+                .padding(bottom = NowLaneLabelGap)
+                .height(with(LocalDensity.current) { 16.sp.toDp() }),
         )
         // 轨道高度等于组的时长跨度。特典有重叠时按时间片切开，只把重叠段做成一块；
         // 没有重叠时（以及演出列）仍按整张卡片定位，高度 = 时长 × 比例尺。
@@ -969,7 +1034,11 @@ private fun OverlapSlice(
 }
 
 @Composable
-private fun GapCard(item: TimelineItem.Gap, nowMinutes: Int? = null) {
+private fun GapCard(
+    item: TimelineItem.Gap,
+    nowMinutes: Int? = null,
+    modifier: Modifier = Modifier,
+) {
     val inProgress = nowMinutes != null && nowMinutes in item.startMinutes until item.endMinutes
     val progressFraction = if (inProgress && item.endMinutes > item.startMinutes) {
         ((nowMinutes!! - item.startMinutes).toFloat() / (item.endMinutes - item.startMinutes))
@@ -980,7 +1049,7 @@ private fun GapCard(item: TimelineItem.Gap, nowMinutes: Int? = null) {
     val progressColor = MaterialTheme.colorScheme.secondary
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         color = Color.Transparent,
     ) {
         Column(
