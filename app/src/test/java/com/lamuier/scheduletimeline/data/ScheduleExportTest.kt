@@ -51,6 +51,37 @@ class ScheduleExportTest {
     }
 
     @Test
+    fun parseImport_acceptsAiOutputWithMarkdownFence() {
+        val text = "以下是转换结果：\n```csv\n${ScheduleExport.IMPORT_SAMPLE}\n```\n希望对你有帮助"
+        val drafts = ScheduleExport.parseImportDrafts(text)
+        assertEquals(2, drafts.size)
+        assertEquals(EventType.PERFORMANCE.storage, drafts[0].event.eventType)
+        assertEquals(listOf("StarDiary", "银烁花火"), drafts[1].event.teamNames)
+    }
+
+    @Test
+    fun parseImport_acceptsAiOutputWithIntroAndOutroLines() {
+        val text = "好的，下面是整理好的表格：\n${ScheduleExport.IMPORT_SAMPLE}\n如需调整请告诉我。"
+        val drafts = ScheduleExport.parseImportDrafts(text)
+        assertEquals(2, drafts.size)
+        assertEquals("2026-06-01", drafts[0].event.dayKey)
+        assertEquals("2026-06-01", drafts[1].event.dayKey)
+    }
+
+    @Test
+    fun importAiPrompt_coversHeaderAndDomainRules() {
+        val prompt = ScheduleExport.IMPORT_AI_PROMPT
+        assertTrue(prompt.contains(ScheduleExport.IMPORT_HEADER))
+        assertTrue(prompt.contains("yyyy-MM-dd"))
+        assertTrue(prompt.contains("演出"))
+        assertTrue(prompt.contains("特典"))
+        assertTrue(prompt.contains("前特"))
+        assertTrue(prompt.contains("平特"))
+        assertTrue(prompt.contains("终特"))
+        assertTrue(prompt.contains(" / "))
+    }
+
+    @Test
     fun toCsv_quotesFieldsContainingCommaOrQuote() {
         val event = ScheduleEvent(
             id = 1,

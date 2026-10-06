@@ -17,6 +17,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -55,6 +58,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -67,6 +71,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -113,7 +118,12 @@ fun ManageDataSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            // 禁止下拉关闭：拖拽手势与导入页页内滚动（识别结果 / 输入框）冲突，
+            // 关闭只保留点击遮罩与系统返回
+            confirmValueChange = { it != SheetValue.Hidden },
+        ),
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
     ) {
@@ -567,12 +577,18 @@ private fun ImportView(
     val previewEvents = remember(text, fallbackDayKey) {
         ScheduleExport.parseImport(text, fallbackDayKey = fallbackDayKey)
     }
+    var selectedIndexes by remember(previewEvents) {
+        mutableStateOf(previewEvents.indices.toSet())
+    }
+    val selectedEvents = previewEvents.filterIndexed { index, _ -> index in selectedIndexes }
     val dark = LocalDarkTheme.current
     val sample = ScheduleExport.IMPORT_SAMPLE
+    val aiPrompt = ScheduleExport.IMPORT_AI_PROMPT
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp),
     ) {
         SheetHeader(
@@ -591,7 +607,7 @@ private fun ImportView(
             },
         )
 
-        ImportSampleHint(sample = sample)
+        ImportSampleHint(sample = sample, aiPrompt = aiPrompt)
 
         Spacer(Modifier.height(14.dp))
 
@@ -622,6 +638,17 @@ private fun ImportView(
 
         PreviewSection(
             events = previewEvents,
+            selectedIndexes = selectedIndexes,
+            onToggle = { index ->
+                selectedIndexes = if (index in selectedIndexes) {
+                    selectedIndexes - index
+                } else {
+                    selectedIndexes + index
+                }
+            },
+            onSetAll = { all ->
+                selectedIndexes = if (all) previewEvents.indices.toSet() else emptySet()
+            },
             sample = sample,
             dark = dark,
         )
@@ -629,11 +656,11 @@ private fun ImportView(
         Spacer(Modifier.height(18.dp))
 
         Button(
-            onClick = { onImport(text) },
+            onClick = { onImport(ScheduleExport.toCsv(selectedEvents)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            enabled = previewEvents.isNotEmpty(),
+            enabled = selectedEvents.isNotEmpty(),
             shape = RoundedCornerShape(16.dp),
         ) {
             Text(
@@ -647,75 +674,147 @@ private fun ImportView(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ImportSampleHint(sample: String) {
+private fun ImportSampleHint(sample: String, aiPrompt: String) {
     val context = LocalContext.current
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                onClick = {},
-                onLongClick = { copyImportSample(context, sample) },
-            ),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Text(
-                text = stringResource(R.string.import_format_fields),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.import_ai_prompt_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = stringResource(R.string.import_ai_prompt_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Surface(
+                    onClick = { copyImportAiPrompt(context, aiPrompt) },
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) {
+                    Text(
+                        text = stringResource(R.string.import_ai_prompt_copy),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.18f),
+                thickness = 0.5.dp,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = sample,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.import_sample_long_press),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
-            )
+            Spacer(Modifier.height(10.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = { copyImportSample(context, sample) },
+                    ),
+            ) {
+                Text(
+                    text = stringResource(R.string.import_format_fields),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = sample,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.import_sample_long_press),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+                )
+            }
         }
     }
 }
 
+private fun copyImportAiPrompt(context: Context, prompt: String) {
+    copyToClipboard(context, "import_ai_prompt", prompt, R.string.import_ai_prompt_copied)
+}
+
 private fun copyImportSample(context: Context, sample: String) {
+    copyToClipboard(context, "import_sample", sample, R.string.import_sample_copied)
+}
+
+private fun copyToClipboard(context: Context, label: String, text: String, toastResId: Int) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("import_sample", sample))
-    Toast.makeText(
-        context,
-        context.getString(R.string.import_sample_copied),
-        Toast.LENGTH_SHORT,
-    ).show()
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+    Toast.makeText(context, toastResId, Toast.LENGTH_SHORT).show()
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PreviewSection(
     events: List<ScheduleEvent>,
+    selectedIndexes: Set<Int>,
+    onToggle: (Int) -> Unit,
+    onSetAll: (Boolean) -> Unit,
     sample: String,
     dark: Boolean,
 ) {
     val context = LocalContext.current
+    val allSelected = events.isNotEmpty() && selectedIndexes.size == events.size
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = if (events.isEmpty()) {
-                stringResource(R.string.import_empty_preview)
-            } else {
-                stringResource(R.string.import_preview_title, events.size)
-            },
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = if (events.isEmpty()) {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            } else {
-                MaterialTheme.colorScheme.onSurface
-            },
-            modifier = Modifier.padding(bottom = 8.dp, start = 2.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp, start = 2.dp, end = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = when {
+                    events.isEmpty() -> stringResource(R.string.import_empty_preview)
+                    allSelected -> stringResource(R.string.import_preview_title, events.size)
+                    else -> stringResource(
+                        R.string.import_preview_selected,
+                        selectedIndexes.size,
+                        events.size,
+                    )
+                },
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (events.isEmpty()) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                modifier = Modifier.weight(1f),
+            )
+            if (events.isNotEmpty()) {
+                Text(
+                    text = stringResource(
+                        if (allSelected) R.string.import_select_none else R.string.import_select_all,
+                    ),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onSetAll(!allSelected) },
+                )
+            }
+        }
 
         Column(
             modifier = Modifier
@@ -754,28 +853,47 @@ private fun PreviewSection(
                     )
                 }
             } else {
-                events.forEach { event ->
-                    ImportPreviewRow(event = event, dark = dark)
+                events.forEachIndexed { index, event ->
+                    ImportPreviewRow(
+                        event = event,
+                        selected = index in selectedIndexes,
+                        dark = dark,
+                        onToggle = { onToggle(index) },
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImportPreviewRow(
     event: ScheduleEvent,
+    selected: Boolean,
     dark: Boolean,
+    onToggle: () -> Unit,
 ) {
     val colors = eventTypeColors(event).adaptTo(dark)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
+            .alpha(if (selected) 1f else 0.45f)
             .background(colors.container)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .combinedClickable(onClick = onToggle)
+            .padding(start = 2.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Checkbox(
+            checked = selected,
+            onCheckedChange = null,
+            colors = CheckboxDefaults.colors(
+                checkedColor = colors.accent,
+                checkmarkColor = colors.onContainer,
+                uncheckedColor = colors.onContainer.copy(alpha = 0.55f),
+            ),
+        )
         Box(
             modifier = Modifier
                 .width(3.dp)

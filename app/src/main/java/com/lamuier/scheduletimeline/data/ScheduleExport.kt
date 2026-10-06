@@ -28,6 +28,31 @@ object ScheduleExport {
             "2026-06-01, StarDiary, 演出, , , 主舞台, 14:20, 14:40, , \n" +
             "2026-06-01, StarDiary / 银烁花火, 特典, 平特, , 吧台A, 17:00, 19:00, , "
 
+    /**
+     * AI 提示词：复制后连同时间表图片发给任意 AI，
+     * 让其输出能被 [parseImport] 直接解析的 CSV。
+     */
+    val IMPORT_AI_PROMPT = """
+        请把下面图片里的日程时间表整理成 CSV 文本。只输出 CSV 内容：不要任何解释，不要用代码块包裹。
+
+        第 1 行固定为表头，之后每行一条日程，字段用半角逗号分隔，可为空但逗号不能省：
+        $IMPORT_HEADER
+
+        各列填写规则：
+        1. 日期：格式 yyyy-MM-dd（如 2026-06-01）。图片没写年份时，按活动信息推断补全，不要留空。
+        2. 团队：出演者或团队名。同一时段多位出演者合并到同一行，团队之间用「 / 」分隔。
+        3. 类型：只能填「演出」或「特典」。舞台演出（Live、舞台、专场）填「演出」；握手、签名、合影、一对一道别等互动环节填「特典」。
+        4. 特典种类：类型为特典时填「前特」「平特」「终特」之一，图片未注明时填「平特」；演出此列留空。
+        5. 场次说明、地点、备注：图片上有就照抄，没有就留空，不要编造。
+        6. 开始、结束：24 小时制 HH:mm（如 14:20）。图片只给了开始时间时，结束填与开始相同的时间。
+        7. 完成：一律留空。
+
+        整理要求：
+        - 按日期、开始时间从早到晚排序；每一天的日程连续排列。
+        - 单元格内容里若含半角逗号，用英文双引号把该单元格整体包起来。
+        - 同一天、同一时段、同类型的多个团队合并为一行；不同时段各占一行，不要合并。
+    """.trimIndent()
+
     fun toCsv(events: List<ScheduleEvent>): String {
         val body = events.joinToString("\n") { event ->
             val type = EventType.fromStorage(event.eventType)
@@ -63,10 +88,21 @@ object ScheduleExport {
      * - v1（6–7 列）：日期, 标题(→团队), 分类(→类型), 地点, 开始, 结束, 备注
      * - 已发布的 10 列格式仍可导入；旧「关联演出开始时间」列（时钟值）会被忽略；
      *   新第 10 列「完成」写「是」时仅特典记为已完成。
-     * 首行若为表头（日期列=「日期」）则跳过。
+     * - 首行若为表头（日期列=「日期」）则跳过。
+     * - AI 输出常带说明文字或 ```csv 围栏：原样解析失败时会剥围栏、再从「日期」表头行重试。
      * 解析为引号感知（RFC 4180）：带引号字段中的逗号 / 引号 / 换行不破坏列结构。
      */
     fun parseImportDrafts(text: String, fallbackDayKey: String = "default"): List<ImportDraft> {
+        val drafts = parseDrafts(text, fallbackDayKey)
+        if (drafts.isNotEmpty()) return drafts
+        val cleaned = stripMarkdownFence(text)
+        val retry = if (cleaned != text) parseDrafts(cleaned, fallbackDayKey) else emptyList()
+        if (retry.isNotEmpty()) return retry
+        val fromHeader = extractFromHeaderLine(cleaned) ?: return emptyList()
+        return parseDrafts(fromHeader, fallbackDayKey)
+    }
+
+    private fun parseDrafts(text: String, fallbackDayKey: String): List<ImportDraft> {
         return parseCsvRecords(text).mapNotNull { parts ->
             if (isHeaderRow(parts)) return@mapNotNull null
             when {
@@ -75,6 +111,23 @@ object ScheduleExport {
                 else -> null
             }
         }
+    }
+
+    /** 剥掉整体 ``` 围栏（含 ```csv 等语言标记），非围栏文本原样返回。 */
+    private fun stripMarkdownFence(text: String): String {
+        val trimmed = text.trim()
+        if (!trimmed.startsWith("```")) return text
+        val body = trimmed.split('\n').drop(1)
+        val lastLine = body.lastOrNull()?.trim().orEmpty()
+        return if (lastLine.startsWith("```")) body.dropLast(1).joinToString("\n") else body.joinToString("\n")
+    }
+
+    /** AI 说明文字里定位第一条「日期」开头行，从该行起截取；找不到返回 null。 */
+    private fun extractFromHeaderLine(text: String): String? {
+        val lines = text.split('\n')
+        val index = lines.indexOfFirst { it.trimStart().startsWith("日期") }
+        if (index < 0) return null
+        return lines.drop(index).joinToString("\n").takeIf { it.isNotBlank() }
     }
 
     /**

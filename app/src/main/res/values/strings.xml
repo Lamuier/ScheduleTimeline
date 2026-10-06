@@ -100,11 +100,18 @@
     <string name="cd_clear_day">清空当日日程</string>
     <string name="manage_clear_day_summary">删除当前查看日期的全部事件，其他日期不受影响</string>
     <string name="import_preview_title">可导入 %1$d 条</string>
+    <string name="import_preview_selected">已选 %1$d / %2$d 条</string>
+    <string name="import_select_all">全选</string>
+    <string name="import_select_none">全不选</string>
     <string name="import_invalid_format">格式错误或时间无效</string>
     <string name="action_parse">解析文本</string>
     <string name="import_hint">每行一条，逗号分隔；日期为 yyyy-MM-dd；特典多个团队用 / 分隔</string>
     <string name="import_format_fields">日期 · 团队（可多项） · 类型 · 特典种类 · 场次说明 · 地点 · 开始 · 结束 · 备注（均可按列留空）</string>
-    <string name="import_sample_long_press">长按下方样例可复制</string>
+    <string name="import_ai_prompt_title">用 AI 把时间表转成表格</string>
+    <string name="import_ai_prompt_desc">复制提示词，连同时间表图片发给任意 AI，再把生成的表格粘回输入框</string>
+    <string name="import_ai_prompt_copy">复制 AI 提示词</string>
+    <string name="import_ai_prompt_copied">已复制 AI 提示词</string>
+    <string name="import_sample_long_press">长按样例区域可复制样例</string>
     <string name="import_sample_copied">已复制样例</string>
     <string name="import_empty_preview">粘贴后将在此显示预览</string>
 

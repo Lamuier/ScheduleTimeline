@@ -10,6 +10,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -83,7 +85,7 @@ import androidx.compose.ui.unit.sp
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
 import com.lamuier.scheduletimeline.data.EventType
-import com.lamuier.scheduletimeline.data.LanePlacement
+import com.lamuier.scheduletimeline.data.LaneFlow
 import com.lamuier.scheduletimeline.data.LaneScale
 import com.lamuier.scheduletimeline.data.LaneSegments
 import com.lamuier.scheduletimeline.data.NowLinePlacement
@@ -184,7 +186,6 @@ internal fun TimelineList(
                             )
                             is TimelineItem.OverlapGroup -> ParallelEventCards(
                                 group = item,
-                                events = events,
                                 nowMinutes = nowMinutes,
                                 onSelectEvent = onSelectEvent,
                             )
@@ -379,9 +380,17 @@ private fun computeNowY(
         val itemTopInViewport = (info.offset - viewportStart).toFloat()
         val withinItem = when (item) {
             is TimelineItem.OverlapGroup -> {
+                // 统一骨架映射(与卡片布局完全一致),红线随之插值。
                 val scale = overlapGroupScale(item, metrics.fontScale)
-                val lanePx = span * scale * metrics.pxPerDp
-                NowLinePlacement.inOverlapLane(metrics.laneHeaderPx, lanePx, frac)
+                val (_, blocks) = planOverlapGroup(item, scale)
+                val flow = LaneFlow.place(blocks, item.startMinutes, scale, LaneScale.IDLE_GAP_MAX_DP)
+                LaneFlow.yFor(flow, now)?.let { yDp ->
+                    metrics.laneHeaderPx + yDp * metrics.pxPerDp
+                } ?: NowLinePlacement.inOverlapLane(
+                    headerPx = metrics.laneHeaderPx,
+                    laneHeightPx = span * scale * metrics.pxPerDp,
+                    fraction = frac,
+                )
             }
             else -> NowLinePlacement.inItem(
                 itemHeightPx = info.size.toFloat(),
@@ -562,6 +571,10 @@ private fun EventCard(
     // 半宽轨道里单卡放不下一行「时间 + 类型标」，时间拆成两行，避免被挤成「14:3 / 0」。
     narrow: Boolean = false,
     titleMaxLines: Int = 1,
+    // 高度不够时的降级：2 = 起止两行；1 = 起止单行；0 = 连时间都放不下，纯色条。
+    timeLines: Int = 2,
+    // 降级后是否还显示场次说明副标题。
+    showSubtitle: Boolean = true,
     // 切开后的非交叉段：只显示这一段自己的起止，不显示整场日程的完整时间。
     displayStart: Int? = null,
     displayEnd: Int? = null,
@@ -601,28 +614,45 @@ private fun EventCard(
                 verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
             ) {
                 if (narrow) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = TimeFormat.minutesToHm(shownStart),
-                                color = colors.accent,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = "~ ${TimeFormat.minutesToHm(shownEnd)}",
-                                color = colors.accent,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    when (timeLines) {
+                        2 -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = TimeFormat.minutesToHm(shownStart),
+                                    color = colors.accent,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = "~ ${TimeFormat.minutesToHm(shownEnd)}",
+                                    color = colors.accent,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
                         }
-                        TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
+                        1 -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = TimeFormat.rangeLabel(shownStart, shownEnd),
+                                color = colors.accent,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
+                        }
+                        // 连一行时间都放不下：只保留卡片色条本身，时间进详情 Sheet 看。
+                        else -> Unit
                     }
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -662,21 +692,24 @@ private fun EventCard(
                     }
                 }
 
-                Text(
-                    text = event.teamDisplay.ifBlank { event.title }.ifBlank {
-                        stringResource(R.string.event_untitled)
-                    },
-                    style = if (compact) {
-                        MaterialTheme.typography.titleSmall
-                    } else {
-                        MaterialTheme.typography.titleMedium
-                    },
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = if (narrow) titleMaxLines.coerceIn(1, LaneScale.MAX_TITLE_LINES) else Int.MAX_VALUE,
-                    overflow = if (narrow) TextOverflow.Ellipsis else TextOverflow.Clip,
-                )
-                if (narrow && event.completed) {
+                if (!narrow || titleMaxLines > 0) {
+                    Text(
+                        text = event.teamDisplay.ifBlank { event.title }.ifBlank {
+                            stringResource(R.string.event_untitled)
+                        },
+                        style = if (compact) {
+                            MaterialTheme.typography.titleSmall
+                        } else {
+                            MaterialTheme.typography.titleMedium
+                        },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.Bold,
+                        // 概览卡限行防止长文本把卡片拉到数屏高，完整内容在详情 Sheet 里看。
+                        maxLines = if (narrow) titleMaxLines else 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (narrow && event.completed && timeLines > 0) {
                     Text(
                         text = stringResource(R.string.event_completed),
                         style = MaterialTheme.typography.labelSmall,
@@ -687,13 +720,13 @@ private fun EventCard(
                     )
                 }
 
-                if (event.title.isNotBlank() && event.teamDisplay.isNotBlank()) {
+                if (event.title.isNotBlank() && event.teamDisplay.isNotBlank() && (showSubtitle || !narrow) && (timeLines > 0 || !narrow)) {
                     Text(
                         text = event.title,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = if (narrow) 1 else Int.MAX_VALUE,
-                        overflow = if (narrow) TextOverflow.Ellipsis else TextOverflow.Clip,
+                        maxLines = if (narrow) 1 else 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -729,61 +762,120 @@ private fun rememberBlinkAlpha(): Float {
 @Composable
 private fun ParallelEventCards(
     group: TimelineItem.OverlapGroup,
-    events: List<ScheduleEvent>,
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
     val fontScale = LocalDensity.current.fontScale
-    // 左右列共用比例尺：短的特典段也会把整组抬高，时间仍然对齐，文字不再被裁掉。
-    // 红线用同一个 overlapGroupScale，避免和卡片各算各的。
+    // 左右列共用比例尺与同一条时间骨架:同一时刻在左右两列永远等高,
+    // 先后顺序一眼可见;「现在」红线用同一份骨架映射,避免和卡片各算各的。
     val scale = overlapGroupScale(group, fontScale)
+    val (segments, blocks) = planOverlapGroup(group, scale)
+    val layout = LaneFlow.place(blocks, group.startMinutes, scale, LaneScale.IDLE_GAP_MAX_DP)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        EventLane(
+        GroupLane(
             label = stringResource(R.string.event_type_performance),
             items = group.performanceEvents,
-            groupStart = group.startMinutes,
-            groupEnd = group.endMinutes,
+            itemOffset = 0,
+            segments = segments,
+            layout = layout,
+            fontScale = fontScale,
             nowMinutes = nowMinutes,
             onSelectEvent = onSelectEvent,
-            scale = scale,
-            fontScale = fontScale,
             modifier = Modifier.weight(1f),
         )
-        EventLane(
+        GroupLane(
             label = stringResource(R.string.event_type_tokuten),
             items = group.tokutenEvents,
-            groupStart = group.startMinutes,
-            groupEnd = group.endMinutes,
+            itemOffset = group.performanceEvents.size,
+            segments = segments,
+            layout = layout,
+            fontScale = fontScale,
             nowMinutes = nowMinutes,
             onSelectEvent = onSelectEvent,
-            scale = scale,
-            fontScale = fontScale,
             modifier = Modifier.weight(1f),
-            overlapMode = LaneOverlapMode.Segments,
         )
     }
 }
 
+/** 段覆盖的全局日程下标(单一卡为单元素,重叠块为多条)。 */
+private fun LaneSegments.Segment.coveredIndices(): List<Int> = when (this) {
+    is LaneSegments.Segment.Single -> listOf(index)
+    is LaneSegments.Segment.Overlap -> indices
+}
+
+/**
+ * 统一时间骨架:两列日程合并切片(跨类型),每个切片给两列同一个 offset 与高度。
+ * 切片高度取两列需求的最大值:比例高度(限高 320dp)与最低可读下限
+ * (单卡「单行时间 + 一行团队名」、重叠块「头部 + 一条条目」)——短卡不再丢团队名。
+ */
+private fun planOverlapGroup(
+    group: TimelineItem.OverlapGroup,
+    scale: Float,
+): Pair<List<LaneSegments.Segment>, List<LaneFlow.LaneBlock>> {
+    val perfItems = group.performanceEvents
+    val tokItems = group.tokutenEvents
+    val segments = LaneSegments.slice(
+        (perfItems + tokItems).map { it.event.startMinutes to it.event.endMinutes },
+    )
+    val blocks = segments.map { segment ->
+        val covered = segment.coveredIndices()
+        // 统一换算成「列内下标」:演出列全局下标即列内下标,特典列需减去演出列条数。
+        val inPerf = covered.filter { it < perfItems.size }
+        val inTok = covered.filter { it >= perfItems.size }.map { it - perfItems.size }
+        val proportional = ((segment.endMinutes - segment.startMinutes).coerceAtLeast(1) * scale)
+            .coerceAtMost(LaneScale.MAX_CARD_DP)
+        val perfNeed = when {
+            inPerf.isEmpty() -> 0f
+            inPerf.size == 1 -> {
+                val event = perfItems[inPerf[0]].event
+                LaneScale.minSlotDp(
+                    completed = event.completed,
+                    hasSubtitle = event.title.isNotBlank() && event.teamDisplay.isNotBlank(),
+                )
+            }
+            else -> LaneScale.overlapFullSlotDp(inPerf.size)
+        }
+        val tokNeed = when {
+            inTok.isEmpty() -> 0f
+            inTok.size == 1 -> {
+                val event = tokItems[inTok[0]].event
+                LaneScale.minSlotDp(
+                    completed = event.completed,
+                    hasSubtitle = event.title.isNotBlank() && event.teamDisplay.isNotBlank(),
+                )
+            }
+            else -> LaneScale.overlapFullSlotDp(inTok.size)
+        }
+        LaneFlow.LaneBlock(
+            start = segment.startMinutes,
+            end = segment.endMinutes,
+            height = maxOf(proportional, perfNeed, tokNeed),
+        )
+    }
+    return segments to blocks
+}
+
 private fun overlapGroupScale(group: TimelineItem.OverlapGroup, fontScale: Float): Float {
     val laneMinutes = (group.endMinutes - group.startMinutes).coerceAtLeast(1)
-    val tokutenSegments = LaneSegments.slice(
-        group.tokutenEvents.map { it.event.startMinutes to it.event.endMinutes },
-    )
-    val tokutenOverlaps = tokutenSegments.any { it is LaneSegments.Segment.Overlap }
-    val blocks = buildList {
-        group.performanceEvents.forEach { add(it.event.toLaneBlock()) }
-        if (tokutenOverlaps) {
-            tokutenSegments.forEach { add(it.toLaneBlock(group.tokutenEvents)) }
-        } else {
-            group.tokutenEvents.forEach { add(it.event.toLaneBlock()) }
-        }
-    }
+    val blocks = laneBlocks(group.performanceEvents) + laneBlocks(group.tokutenEvents)
     return LaneScale.resolve(laneMinutes, blocks, fontScale)
+}
+
+/** 有重叠的列按重叠片（合并块）计算占位，无重叠时按整卡计算。 */
+private fun laneBlocks(events: List<TimelineItem.Event>): List<LaneScale.Block> {
+    if (events.isEmpty()) return emptyList()
+    val segments = LaneSegments.slice(events.map { it.event.startMinutes to it.event.endMinutes })
+    val hasOverlap = segments.any { it is LaneSegments.Segment.Overlap }
+    return if (hasOverlap) {
+        segments.map { it.toLaneBlock(events) }
+    } else {
+        events.map { it.event.toLaneBlock() }
+    }
 }
 
 private fun ScheduleEvent.toLaneBlock(minutes: Int = endMinutes - startMinutes): LaneScale.Block =
@@ -806,48 +898,34 @@ private fun LaneSegments.Segment.toLaneBlock(items: List<TimelineItem.Event>): L
     }
 }
 
-private fun laneTitleLines(
-    event: ScheduleEvent,
-    slotMinutes: Int,
-    scale: Float,
-    fontScale: Float,
-): Int {
-    val cardInner = slotMinutes.coerceAtLeast(1) * scale - LaneScale.CARD_GAP_DP
-    return LaneScale.titleLinesThatFit(
-        cardInnerDp = cardInner,
-        completed = event.completed,
-        hasSubtitle = event.title.isNotBlank() && event.teamDisplay.isNotBlank(),
-        fontScale = fontScale,
-    )
+/** 重叠块头部时间：块高放得下就两行，矮块降为单行；再矮由条目区直接占满。 */
+private fun sliceTimeLines(slotHeight: Float): Int {
+    val available = slotHeight - 2 * LaneScale.NARROW_PADDING_V_DP
+    return when {
+        available >= LaneScale.TIME_BLOCK_DP + 0.5f -> 2
+        available >= LaneScale.TIME_LINE_DP + 0.5f -> 1
+        else -> 0
+    }
 }
 
-private enum class LaneOverlapMode {
-    /** 演出列：彼此重叠时并排，避免卡片盖住点击。 */
-    Columns,
-
-    /** 特典列：不并排。只有重叠的那一段时间单独成块，前后仍是各自的卡片。 */
-    Segments,
-}
-
+/**
+ * 单列渲染:沿统一骨架放置本列的卡片。
+ * 骨架切片里本列有卡就画(单卡 / 多卡合并块),没有就留空——
+ * 卡片的纵向位置完全由骨架决定,跨列先后顺序与同时刻对齐因此成立。
+ */
 @Composable
-private fun EventLane(
+private fun GroupLane(
     label: String,
     items: List<TimelineItem.Event>,
-    groupStart: Int,
-    groupEnd: Int,
+    itemOffset: Int,
+    segments: List<LaneSegments.Segment>,
+    layout: LaneFlow.Layout,
+    fontScale: Float,
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
-    scale: Float,
-    fontScale: Float,
     modifier: Modifier = Modifier,
-    overlapMode: LaneOverlapMode = LaneOverlapMode.Columns,
 ) {
-    val laneMinutes = (groupEnd - groupStart).coerceAtLeast(1)
-    val laneHeight = (laneMinutes * scale).dp
-
-    Column(
-        modifier = modifier,
-    ) {
+    Column(modifier = modifier) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
@@ -857,87 +935,55 @@ private fun EventLane(
                 .padding(bottom = NowLaneLabelGap)
                 .height(with(LocalDensity.current) { 16.sp.toDp() }),
         )
-        // 轨道高度等于组的时长跨度。特典有重叠时按时间片切开，只把重叠段做成一块；
-        // 没有重叠时（以及演出列）仍按整张卡片定位，高度 = 时长 × 比例尺。
-        val ranges = items.map { it.event.startMinutes to it.event.endMinutes }
-        val segments = if (overlapMode == LaneOverlapMode.Segments) LaneSegments.slice(ranges) else emptyList()
-        if (segments.any { it is LaneSegments.Segment.Overlap }) {
-            Box(
-                modifier = Modifier
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(layout.height.dp)
+                .clipToBounds(),
+        ) {
+            segments.forEachIndexed { segIdx, segment ->
+                val slot = layout.slots[segIdx]
+                val colIndices = segment.coveredIndices()
+                    .map { it - itemOffset }
+                    .filter { it in items.indices }
+                if (colIndices.isEmpty()) return@forEachIndexed
+                val segmentModifier = Modifier
+                    .offset(y = slot.offset.dp)
                     .fillMaxWidth()
-                    .height(laneHeight)
-                    .clipToBounds(),
-            ) {
-                segments.forEach { segment ->
-                    val segmentOffset = ((segment.startMinutes - groupStart) * scale).dp
-                    val segmentHeight =
-                        ((segment.endMinutes - segment.startMinutes).coerceAtLeast(1) * scale).dp
-                    val segmentModifier = Modifier
-                        .offset(y = segmentOffset)
-                        .fillMaxWidth()
-                        .height(segmentHeight)
-                        .padding(bottom = PARALLEL_CARD_GAP)
-                    when (segment) {
-                        is LaneSegments.Segment.Single -> EventCard(
-                            item = items[segment.index],
-                            nowMinutes = nowMinutes,
-                            onClick = { onSelectEvent(items[segment.index]) },
-                            compact = true,
-                            fillHeight = true,
-                            narrow = true,
-                            titleMaxLines = laneTitleLines(
-                                event = items[segment.index].event,
-                                slotMinutes = segment.endMinutes - segment.startMinutes,
-                                scale = scale,
-                                fontScale = fontScale,
-                            ),
-                            displayStart = segment.startMinutes,
-                            displayEnd = segment.endMinutes,
-                            modifier = segmentModifier,
-                        )
-                        is LaneSegments.Segment.Overlap -> OverlapSlice(
-                            items = segment.indices.map { items[it] },
-                            startMinutes = segment.startMinutes,
-                            endMinutes = segment.endMinutes,
-                            nowMinutes = nowMinutes,
-                            onSelectEvent = onSelectEvent,
-                            modifier = segmentModifier,
-                        )
-                    }
-                }
-            }
-        } else {
-            val placements = LanePlacement.place(ranges)
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(laneHeight)
-                    .clipToBounds(),
-            ) {
-                val columnCount = placements.firstOrNull()?.columnCount ?: 1
-                val columnGap = if (columnCount > 1) PARALLEL_CARD_GAP else 0.dp
-                val columnWidth = (maxWidth - columnGap * (columnCount - 1)) / columnCount
-                items.forEachIndexed { index, item ->
-                    val event = item.event
-                    val slot = placements[index]
-                    val cardOffset = ((event.startMinutes - groupStart) * scale).dp
-                    val slotMinutes = (event.endMinutes - event.startMinutes).coerceAtLeast(1)
-                    val cardHeight = (slotMinutes * scale).dp
-                    val cardWidth = columnWidth * slot.span + columnGap * (slot.span - 1)
+                    .height(slot.height.dp)
+                    .padding(bottom = PARALLEL_CARD_GAP)
+                if (colIndices.size == 1) {
+                    val item = items[colIndices[0]]
+                    val plan = LaneScale.cardContentPlan(
+                        availableDp = slot.height - LaneScale.CARD_GAP_DP,
+                        completed = item.event.completed,
+                        hasSubtitle = item.event.title.isNotBlank() &&
+                            item.event.teamDisplay.isNotBlank(),
+                        fontScale = fontScale,
+                    )
                     EventCard(
                         item = item,
                         nowMinutes = nowMinutes,
                         onClick = { onSelectEvent(item) },
                         compact = true,
                         fillHeight = true,
-                        // 每一列都只有并排区域的一半宽，时间必须拆行，不能和类型标、完成标记挤在一起。
                         narrow = true,
-                        titleMaxLines = laneTitleLines(event, slotMinutes, scale, fontScale),
-                        modifier = Modifier
-                            .offset(x = (columnWidth + columnGap) * slot.column, y = cardOffset)
-                            .width(cardWidth)
-                            .height(cardHeight)
-                            .padding(bottom = PARALLEL_CARD_GAP),
+                        titleMaxLines = plan.titleLines,
+                        timeLines = plan.timeLines,
+                        showSubtitle = plan.showSubtitle,
+                        displayStart = segment.startMinutes,
+                        displayEnd = segment.endMinutes,
+                        modifier = segmentModifier,
+                    )
+                } else {
+                    OverlapSlice(
+                        items = colIndices.map { items[it] },
+                        startMinutes = segment.startMinutes,
+                        endMinutes = segment.endMinutes,
+                        nowMinutes = nowMinutes,
+                        onSelectEvent = onSelectEvent,
+                        timeLines = sliceTimeLines(slot.height),
+                        modifier = segmentModifier,
                     )
                 }
             }
@@ -954,6 +1000,7 @@ private fun OverlapSlice(
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
+    timeLines: Int = 2,
 ) {
     val dark = LocalDarkTheme.current
     val inProgress = nowMinutes != null &&
@@ -980,52 +1027,75 @@ private fun OverlapSlice(
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
-                text = TimeFormat.minutesToHm(startMinutes),
-                style = MaterialTheme.typography.labelMedium,
-                color = WarningAmber,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "~ ${TimeFormat.minutesToHm(endMinutes)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = WarningAmber,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
-            items.forEach { item ->
-                val event = item.event
-                val colors = eventTypeColors(event).adaptTo(dark)
-                val cardAlpha = if (event.completed) 0.62f else 1f
-                Surface(
-                    onClick = { onSelectEvent(item) },
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.container.copy(alpha = colors.container.alpha * cardAlpha),
-                    contentColor = colors.onContainer,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            when (timeLines) {
+                2 -> {
+                    Text(
+                        text = TimeFormat.minutesToHm(startMinutes),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = WarningAmber,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "~ ${TimeFormat.minutesToHm(endMinutes)}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = WarningAmber,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                1 -> Text(
+                    text = TimeFormat.rangeLabel(startMinutes, endMinutes),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = WarningAmber,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // 块极矮：时间由条目区（可滚动）接管，不留头部。
+                else -> Unit
+            }
+            // 块高封顶后内容可能放不下：条目区在块内滚动，保证每条都能点开。
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items.forEach { item ->
+                    val event = item.event
+                    val colors = eventTypeColors(event).adaptTo(dark)
+                    val cardAlpha = if (event.completed) 0.62f else 1f
+                    Surface(
+                        onClick = { onSelectEvent(item) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = colors.container.copy(alpha = colors.container.alpha * cardAlpha),
+                        contentColor = colors.onContainer,
                     ) {
-                        Text(
-                            text = event.teamDisplay.ifBlank { event.title }.ifBlank {
-                                stringResource(R.string.event_untitled)
-                            },
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = event.teamDisplay.ifBlank { event.title }.ifBlank {
+                                    stringResource(R.string.event_untitled)
+                                },
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            TypeMarkBadge(event = event, size = 18.dp, textSize = 9.sp)
+                        }
                     }
                 }
             }
@@ -1041,7 +1111,7 @@ private fun GapCard(
 ) {
     val inProgress = nowMinutes != null && nowMinutes in item.startMinutes until item.endMinutes
     val progressFraction = if (inProgress && item.endMinutes > item.startMinutes) {
-        ((nowMinutes!! - item.startMinutes).toFloat() / (item.endMinutes - item.startMinutes))
+        ((nowMinutes - item.startMinutes).toFloat() / (item.endMinutes - item.startMinutes))
             .coerceIn(0f, 1f)
     } else {
         0f

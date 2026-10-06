@@ -1,6 +1,7 @@
 package com.lamuier.scheduletimeline.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -22,8 +23,9 @@ class LaneScaleTest {
     fun resolve_raisesScaleSoShortBlocksStayReadable() {
         val short = LaneScale.singleSlotDp(completed = false, hasSubtitle = false)
         val completed = LaneScale.singleSlotDp(completed = true, hasSubtitle = true)
+        // 组时长适中（未触 MAX_LANE_DP 上限）时，可读性仍会把比例尺抬起来。
         val scale = LaneScale.resolve(
-            laneMinutes = 100,
+            laneMinutes = 50,
             blocks = listOf(
                 LaneScale.Block(15, short),
                 LaneScale.Block(30, completed),
@@ -43,6 +45,7 @@ class LaneScaleTest {
             blocks = listOf(LaneScale.Block(15, minHeight)),
         )
 
+        // 可读性优先：短块不被压矮；过长的单卡由 MAX_CARD_DP 单独封顶。
         assertTrue(15 * scale >= minHeight)
         assertTrue(scale > LaneScale.MAX_LANE_DP / 600f)
     }
@@ -73,6 +76,70 @@ class LaneScaleTest {
     fun resolve_emptyBlocks_usesPreferredScale() {
         assertEquals(LaneScale.IDEAL_PX_PER_MINUTE, LaneScale.resolve(90, emptyList()), 0.01f)
         assertEquals(LaneScale.MAX_LANE_DP / 300f, LaneScale.resolve(300, emptyList()), 0.01f)
+    }
+
+    @Test
+    fun cardContentPlan_prefersFullContentWhenTallEnough() {
+        val plan = LaneScale.cardContentPlan(
+            availableDp = 240f,
+            completed = false,
+            hasSubtitle = true,
+        )
+        assertEquals(2, plan.timeLines)
+        assertEquals(LaneScale.MAX_TITLE_LINES, plan.titleLines)
+        assertTrue(plan.showSubtitle)
+    }
+
+    @Test
+    fun cardContentPlan_dropsSubtitleBeforeTitleLines() {
+        // 可用 96dp：副标题先让位，保住两行时间 + 一行标题。
+        val plan = LaneScale.cardContentPlan(
+            availableDp = 96f,
+            completed = false,
+            hasSubtitle = true,
+        )
+        assertEquals(2, plan.timeLines)
+        assertEquals(1, plan.titleLines)
+        assertFalse(plan.showSubtitle)
+    }
+
+    @Test
+    fun cardContentPlan_fallsBackToSingleLineTimeWhenVeryShort() {
+        // 可用 62dp:放不下「单行时间 + 标题」,退到单行时间兜底。
+        val plan = LaneScale.cardContentPlan(
+            availableDp = 62f,
+            completed = false,
+            hasSubtitle = true,
+        )
+        assertEquals(1, plan.timeLines)
+        assertEquals(0, plan.titleLines)
+        assertFalse(plan.showSubtitle)
+    }
+
+    @Test
+    fun cardContentPlan_fallsBackToBareBarWhenTooShort() {
+        val plan = LaneScale.cardContentPlan(
+            availableDp = 4f,
+            completed = false,
+            hasSubtitle = true,
+        )
+        assertEquals(0, plan.timeLines)
+        assertEquals(0, plan.titleLines)
+        assertFalse(plan.showSubtitle)
+    }
+
+    @Test
+    fun cardContentPlan_minSlotGuaranteesTeamNameVisible() {
+        // minSlotDp 的可用高度必须放得下「单行时间 + 两行团队名」。
+        val available = LaneScale.minSlotDp(completed = false, hasSubtitle = false) -
+            LaneScale.CARD_GAP_DP
+        val plan = LaneScale.cardContentPlan(
+            availableDp = available,
+            completed = false,
+            hasSubtitle = false,
+        )
+        assertEquals(1, plan.timeLines)
+        assertEquals(2, plan.titleLines)
     }
 
     @Test
