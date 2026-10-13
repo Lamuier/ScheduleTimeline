@@ -129,7 +129,7 @@ object LaneScale {
         hasSubtitle: Boolean,
         fontScale: Float = 1f,
     ): Int {
-        val font = fontScale.coerceIn(1f, 1.5f)
+        val font = fontScale.coerceAtLeast(1f)
         for (lines in MAX_TITLE_LINES downTo 1) {
             val needed = contentHeightDp(completed, hasSubtitle, lines) * font
             if (cardInnerDp + 0.5f >= needed) return lines
@@ -149,7 +149,7 @@ object LaneScale {
         fontScale: Float = 1f,
     ): CardContentPlan {
         val available = availableDp
-        val font = fontScale.coerceIn(1f, 1.5f)
+        val font = fontScale.coerceAtLeast(1f)
         for (titleLines in MAX_TITLE_LINES downTo 1) {
             for (timeLines in listOf(2, 1)) {
                 for (showSubtitle in (if (hasSubtitle) listOf(true, false) else listOf(false))) {
@@ -176,7 +176,7 @@ object LaneScale {
 
     fun resolve(laneMinutes: Int, blocks: List<Block>, fontScale: Float = 1f): Float {
         val span = laneMinutes.coerceAtLeast(1).toFloat()
-        val font = fontScale.coerceIn(1f, 1.5f)
+        val font = fontScale.coerceAtLeast(1f)
         val preferred = minOf(IDEAL_PX_PER_MINUTE, MAX_LANE_DP / span)
         val readable = blocks.maxOfOrNull { block ->
             (block.minHeightDp * font) / block.minutes.coerceAtLeast(1)

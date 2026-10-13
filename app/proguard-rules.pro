@@ -3,3 +3,6 @@
 # 交给 R8 混淆优化；Room runtime 自带 consumer 规则已保留 *_Impl 反射查找。
 -keep class com.lamuier.scheduletimeline.data.ScheduleEvent { *; }
 -keep class com.lamuier.scheduletimeline.data.Category { *; }
+
+# SavedStateHandle serializes the edit session across process recreation.
+-keep class com.lamuier.scheduletimeline.ui.edit.EditUiState { *; }

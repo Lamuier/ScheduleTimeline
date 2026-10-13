@@ -84,14 +84,15 @@ object ChartLayout {
     }
 
     fun stats(events: List<ScheduleEvent>): DayStats? {
-        if (events.isEmpty()) return null
-        val merged = mergedBusyIntervals(events)
+        val valid = events.filter { it.hasValidTime }
+        if (valid.isEmpty()) return null
+        val merged = mergedBusyIntervals(valid)
         val busy = merged.sumOf { it.second - it.first }
         val first = merged.first().first
         val last = merged.last().second
 
         var conflicts = 0
-        val sorted = events.sortedBy { it.startMinutes }
+        val sorted = valid.sortedBy { it.startMinutes }
         for (i in sorted.indices) {
             for (j in i + 1 until sorted.size) {
                 if (sorted[j].startMinutes >= sorted[i].endMinutes) break
@@ -100,7 +101,7 @@ object ChartLayout {
         }
 
         return DayStats(
-            eventCount = events.size,
+            eventCount = valid.size,
             busyMinutes = busy,
             freeMinutes = (last - first) - busy,
             conflictCount = conflicts,
@@ -111,8 +112,9 @@ object ChartLayout {
 
     /** 合并后的忙碌区间（升序、互不重叠）。 */
     private fun mergedBusyIntervals(events: List<ScheduleEvent>): List<Pair<Int, Int>> {
-        if (events.isEmpty()) return emptyList()
-        val sorted = events.sortedBy { it.startMinutes }
+        val valid = events.filter { it.hasValidTime }
+        if (valid.isEmpty()) return emptyList()
+        val sorted = valid.sortedBy { it.startMinutes }
         val merged = mutableListOf(sorted.first().startMinutes to sorted.first().endMinutes)
         sorted.drop(1).forEach { event ->
             val last = merged.last()

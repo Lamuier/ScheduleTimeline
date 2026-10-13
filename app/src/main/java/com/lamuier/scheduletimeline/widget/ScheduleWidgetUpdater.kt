@@ -1,5 +1,8 @@
 package com.lamuier.scheduletimeline.widget
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import android.net.Uri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
@@ -33,7 +36,14 @@ object ScheduleWidgetUpdater {
     private const val OPEN_APP_REQUEST_CODE = 0
     private const val LIST_ITEM_TEMPLATE_REQUEST_CODE = 4201
 
-    suspend fun refreshAll(context: Context) {
+    private val mutex = Mutex()
+    fun hasWidgets(context: Context): Boolean {
+        val manager = AppWidgetManager.getInstance(context)
+        return listOf(ScheduleWidgetProviderSmall::class.java, ScheduleWidgetProviderLarge::class.java)
+            .any { manager.getAppWidgetIds(ComponentName(context, it)).isNotEmpty() }
+    }
+    suspend fun refreshAll(context: Context) = mutex.withLock { refreshLocked(context) }
+    private suspend fun refreshLocked(context: Context) {
         val appContext = context.applicationContext
         val manager = AppWidgetManager.getInstance(appContext)
         val smallIds = manager.getAppWidgetIds(
@@ -116,6 +126,8 @@ object ScheduleWidgetUpdater {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = "${context.packageName}.OPEN_WIDGET_EVENT"
+            data = Uri.parse("schedule://widget/$eventId")
             putExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID, eventId)
         }
         // 用事件 id 作 requestCode，避免不同事件的 PendingIntent 被系统合并

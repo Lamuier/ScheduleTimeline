@@ -7,7 +7,11 @@ import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
 /** CSV 导入草稿。 */
-data class ImportDraft(val event: ScheduleEvent)
+data class ImportDraft(val event: ScheduleEvent, val line: Int = 0)
+enum class ImportError { Fields, Date, Team, Time, EndBeforeStart, Type, Quoting }
+data class ImportIssue(val line: Int, val error: ImportError)
+data class ImportParseResult(val drafts: List<ImportDraft>, val issues: List<ImportIssue>)
+private data class CsvRecord(val line: Int, val fields: List<String>, val malformed: Boolean = false)
 
 /** 空日提示：距最近有日程的日期还有几天。 */
 data class NearestScheduleHint(
@@ -44,7 +48,7 @@ object ScheduleExport {
         3. 类型：只能填「演出」或「特典」。舞台演出（Live、舞台、专场）填「演出」；握手、签名、合影、一对一道别等互动环节填「特典」。
         4. 特典种类：类型为特典时填「前特」「平特」「终特」之一，图片未注明时填「平特」；演出此列留空。
         5. 场次说明、地点、备注：图片上有就照抄，没有就留空，不要编造。
-        6. 开始、结束：24 小时制 HH:mm（如 14:20）。图片只给了开始时间时，结束填与开始相同的时间。
+        6. 开始、结束：24 小时制 HH:mm（如 14:20）。图片只给了开始时间时，结束留空，等待用户补充；不要推测结束时间。
         7. 完成：一律留空。
 
         整理要求：
@@ -92,42 +96,37 @@ object ScheduleExport {
      * - AI 输出常带说明文字或 ```csv 围栏：原样解析失败时会剥围栏、再从「日期」表头行重试。
      * 解析为引号感知（RFC 4180）：带引号字段中的逗号 / 引号 / 换行不破坏列结构。
      */
-    fun parseImportDrafts(text: String, fallbackDayKey: String = "default"): List<ImportDraft> {
-        val drafts = parseDrafts(text, fallbackDayKey)
-        if (drafts.isNotEmpty()) return drafts
-        val cleaned = stripMarkdownFence(text)
-        val retry = if (cleaned != text) parseDrafts(cleaned, fallbackDayKey) else emptyList()
-        if (retry.isNotEmpty()) return retry
-        val fromHeader = extractFromHeaderLine(cleaned) ?: return emptyList()
-        return parseDrafts(fromHeader, fallbackDayKey)
-    }
+    fun parseImportDrafts(text: String, fallbackDayKey: String = "default"): List<ImportDraft> =
+        parseImportResult(text, fallbackDayKey).drafts
 
-    private fun parseDrafts(text: String, fallbackDayKey: String): List<ImportDraft> {
-        return parseCsvRecords(text).mapNotNull { parts ->
-            if (isHeaderRow(parts)) return@mapNotNull null
-            when {
-                parts.size >= 9 -> parseV2(parts, fallbackDayKey)
-                parts.size >= 6 -> parseV1(parts, fallbackDayKey)
+    fun parseImportResult(text: String, fallbackDayKey: String): ImportParseResult {
+        val drafts = mutableListOf<ImportDraft>()
+        val issues = mutableListOf<ImportIssue>()
+        parseCsvRecords(text).forEach { record ->
+            val parts = record.fields
+            if (isHeaderRow(parts) || (parts.size == 1 && !record.malformed)) return@forEach
+            val modern = parts.size >= 9
+            val startIndex = if (modern) 6 else 4
+            val endIndex = startIndex + 1
+            val start = parts.getOrNull(startIndex)?.let(TimeFormat::parseHm)
+            val end = parts.getOrNull(endIndex)?.let(TimeFormat::parseHm)
+            val error = when {
+                record.malformed -> ImportError.Quoting
+                parts.size < 6 || parts.size == 8 -> ImportError.Fields
+                parseDayKey(parts[0].ifBlank { fallbackDayKey }) == null -> ImportError.Date
+                TeamNames.fromCsv(parts[1]).isBlank() -> ImportError.Team
+                modern && parts[2].uppercase() !in setOf("演出", "特典", "PERFORMANCE", "TOKUTEN") -> ImportError.Type
+                start == null || end == null -> ImportError.Time
+                end <= start -> ImportError.EndBeforeStart
                 else -> null
             }
+            if (error != null) issues += ImportIssue(record.line, error)
+            else {
+                val draft = if (modern) parseV2(parts, fallbackDayKey) else parseV1(parts, fallbackDayKey)
+                if (draft != null) drafts += draft.copy(line = record.line)
+            }
         }
-    }
-
-    /** 剥掉整体 ``` 围栏（含 ```csv 等语言标记），非围栏文本原样返回。 */
-    private fun stripMarkdownFence(text: String): String {
-        val trimmed = text.trim()
-        if (!trimmed.startsWith("```")) return text
-        val body = trimmed.split('\n').drop(1)
-        val lastLine = body.lastOrNull()?.trim().orEmpty()
-        return if (lastLine.startsWith("```")) body.dropLast(1).joinToString("\n") else body.joinToString("\n")
-    }
-
-    /** AI 说明文字里定位第一条「日期」开头行，从该行起截取；找不到返回 null。 */
-    private fun extractFromHeaderLine(text: String): String? {
-        val lines = text.split('\n')
-        val index = lines.indexOfFirst { it.trimStart().startsWith("日期") }
-        if (index < 0) return null
-        return lines.drop(index).joinToString("\n").takeIf { it.isNotBlank() }
+        return ImportParseResult(drafts, issues)
     }
 
     /**
@@ -137,8 +136,11 @@ object ScheduleExport {
      * - 引号段内 `""` 表示字面引号；段内换行属于同一条记录。
      * - 字段解析后 trim；仅含一个空字段的空白行跳过。
      */
-    private fun parseCsvRecords(text: String): List<List<String>> {
-        val records = mutableListOf<List<String>>()
+    private fun parseCsvRecords(text: String): List<CsvRecord> {
+        val records = mutableListOf<CsvRecord>()
+        var line = 1
+        var recordLine = 1
+        var inQuotes = false
         val fields = mutableListOf<String>()
         val field = StringBuilder()
 
@@ -147,15 +149,22 @@ object ScheduleExport {
             field.clear()
         }
 
-        fun endRecord() {
+        fun endRecord(malformed: Boolean = false) {
             endField()
-            if (fields.size > 1 || fields.first().isNotEmpty()) records.add(fields.toList())
+            if (fields.size > 1 || fields.first().isNotEmpty()) records.add(CsvRecord(recordLine, fields.toList(), malformed))
             fields.clear()
         }
 
-        var inQuotes = false
         var i = 0
         while (i < text.length) {
+            // Ignore AI fences only between CSV records, never inside quoted notes.
+            if (!inQuotes && fields.isEmpty() && field.isBlank() && (i == 0 || text[i - 1] == '\n')) {
+                val lineEnd = text.indexOf('\n', i).let { if (it < 0) text.length else it }
+                if (text.substring(i, lineEnd).trim().startsWith("```")) {
+                    i = lineEnd
+                    if (i == text.length) break
+                }
+            }
             val c = text[i]
             if (inQuotes) {
                 when {
@@ -169,6 +178,7 @@ object ScheduleExport {
                     }
                     else -> {
                         field.append(c)
+                        if (c == '\n') line++
                         i++
                     }
                 }
@@ -187,6 +197,9 @@ object ScheduleExport {
                     }
                     '\n', '\r' -> {
                         endRecord()
+                        if (c == '\r' && text.getOrNull(i + 1) == '\n') i++
+                        line++
+                        recordLine = line
                         i++
                     }
                     else -> {
@@ -197,7 +210,7 @@ object ScheduleExport {
             }
         }
         // 结尾无换行的最后一条记录
-        if (field.isNotEmpty() || fields.isNotEmpty()) endRecord()
+        if (field.isNotEmpty() || fields.isNotEmpty()) endRecord(inQuotes)
         return records
     }
 

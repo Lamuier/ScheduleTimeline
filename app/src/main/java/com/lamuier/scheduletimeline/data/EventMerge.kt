@@ -61,24 +61,37 @@ object EventMerge {
         val teams = TeamNames.normalize(ordered.flatMap(::namesOf))
         val teamSet = teams.toSet()
         val titles = ordered
-            .map { it.title.trim() }
-            .filter { it.isNotEmpty() && it !in teamSet }
+            .map { it.title }
+            .filter { it.isNotBlank() && it !in teamSet }
             .distinct()
-        val locations = ordered.map { it.location.trim() }.filter { it.isNotEmpty() }.distinct()
-        val notes = ordered.map { it.note.trim() }.filter { it.isNotEmpty() }.distinct()
+        val locations = ordered.map { it.location }.filter { it.isNotBlank() }.distinct()
+        val notes = ordered.map { it.note }.filter { it.isNotBlank() }.distinct()
         val category = ordered.firstOrNull { it.category.isNotBlank() }?.category.orEmpty()
         return keeper.copy(
             team = TeamNames.encode(teams),
             eventType = type.storage,
             tokutenKind = slot.tokutenKind,
-            title = titles.joinToString(" / "),
-            location = locations.joinToString(" / "),
-            note = notes.joinToString("\n"),
+            title = mergeText(titles, " / "),
+            location = mergeText(locations, " / "),
+            note = mergeText(notes, "\n"),
             category = category,
             linkedPerformanceId = null,
             completed = type == EventType.TOKUTEN && ordered.all { it.completed },
         )
     }
+
+    // Match whole source blocks at display boundaries; never split a user's text into tokens.
+    internal fun mergeText(values: List<String>, separator: String): String =
+        values.fold("") { accumulated, value ->
+            fun containsBlock(container: String, block: String): Boolean =
+                (separator + container + separator).contains(separator + block + separator)
+            when {
+                accumulated.isEmpty() -> value
+                containsBlock(accumulated, value) -> accumulated
+                containsBlock(value, accumulated) -> value
+                else -> accumulated + separator + value
+            }
+        }
 
     /** 没有团队名时，用场次说明兜底，避免旧数据合并后名字丢失。 */
     private fun namesOf(event: ScheduleEvent): List<String> {

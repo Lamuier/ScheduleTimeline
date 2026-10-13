@@ -49,11 +49,13 @@ object TimelineBuilder {
     fun build(events: List<ScheduleEvent>): List<TimelineItem> {
         if (events.isEmpty()) return emptyList()
 
-        val sorted = events.sortedWith(
+        val sorted = events.filter { it.hasValidTime }.sortedWith(
             compareBy<ScheduleEvent> { it.startMinutes }
                 .thenBy { it.endMinutes }
                 .thenBy { it.id },
         )
+
+        if (sorted.isEmpty()) return emptyList()
 
         val clusters = mutableListOf<List<ScheduleEvent>>()
         var cluster = mutableListOf<ScheduleEvent>()
@@ -95,8 +97,7 @@ object TimelineBuilder {
     }
 
     private fun shouldShowParallel(events: List<ScheduleEvent>): Boolean {
-        val types = events.map { EventType.fromStorage(it.eventType) }.toSet()
-        return types.contains(EventType.PERFORMANCE) && types.contains(EventType.TOKUTEN)
+        return events.size > 1
     }
 
     private fun gapsBetween(

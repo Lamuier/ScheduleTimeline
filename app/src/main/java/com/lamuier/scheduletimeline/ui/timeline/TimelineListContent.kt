@@ -54,11 +54,17 @@ import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.lamuier.scheduletimeline.data.TimelineTextMetrics
+import com.lamuier.scheduletimeline.data.TimelineLayoutPlan
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -76,6 +82,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -106,6 +113,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
+private data class AxisTextMetrics(val width: Dp, val linePx: Float)
+
+@Composable
+private fun rememberAxisTextMetrics(): AxisTextMetrics {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+    return remember(density, style, measurer) {
+        val size = measurer.measure("23:59", style, maxLines = 1).size
+        AxisTextMetrics(with(density) { size.width.toDp().coerceAtLeast(46.dp) }, size.height.toFloat())
+    }
+}
+
 @Composable
 internal fun TimelineList(
     items: List<TimelineItem>,
@@ -115,7 +135,22 @@ internal fun TimelineList(
 ) {
     // 用 LazyListState 直接取可见 item 在视口内的 offset/size，避免 onPlaced 坐标空间错位。
     val listState = rememberLazyListState()
+    val axisText = rememberAxisTextMetrics()
     val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val typography = MaterialTheme.typography
+    val textMetrics = remember(density, typography, textMeasurer) {
+        fun height(style: androidx.compose.ui.text.TextStyle) = with(density) {
+            textMeasurer.measure("团队 23:59", style, maxLines = 1).size.height.toDp().value
+        }
+        TimelineTextMetrics(height(typography.labelMedium), height(typography.titleSmall),
+            height(typography.labelSmall), height(typography.bodyMedium))
+    }
+    val plans = remember(items, textMetrics) {
+        items.filterIsInstance<TimelineItem.OverlapGroup>().associateWith {
+            TimelineLayoutPlan.build(it, textMetrics)
+        }
+    }
     val nowItemKey = remember(items, nowMinutes) {
         nowMinutes?.let { now -> nowContainingItemKey(items, now) }
     }
@@ -127,11 +162,12 @@ internal fun TimelineList(
         val extraPad = if (nowItemKey != null) maxHeight / 2 else 8.dp
         val bottomPad = extraPad.coerceAtLeast(80.dp)
         val nowMetrics = with(density) {
-            val labelLinePx = 16.sp.toPx()
+            val labelLinePx = axisText.linePx
             NowLineMetrics(
+                plans = plans,
                 bottomPadPx = NowAxisBottomPad.toPx(),
                 labelLinePx = labelLinePx,
-                laneHeaderPx = labelLinePx + NowLaneLabelGap.toPx(),
+                laneHeaderPx = 16.sp.toPx() + NowLaneLabelGap.toPx(),
                 fontScale = fontScale,
                 pxPerDp = this.density,
             )
@@ -186,6 +222,8 @@ internal fun TimelineList(
                             )
                             is TimelineItem.OverlapGroup -> ParallelEventCards(
                                 group = item,
+                                plan = plans.getValue(item),
+                                textMetrics = textMetrics,
                                 nowMinutes = nowMinutes,
                                 onSelectEvent = onSelectEvent,
                             )
@@ -221,7 +259,7 @@ internal fun TimelineList(
                 val viewportH = listState.layoutInfo.viewportEndOffset -
                     listState.layoutInfo.viewportStartOffset
                 if (nowY != null && viewportH > 0 && nowY in 0f..viewportH.toFloat()) {
-                    NowLine(y = nowY)
+                    NowLine(y = nowY, labelWidth = axisText.width)
                 }
             }
 
@@ -342,6 +380,7 @@ private fun nowJumpDirection(
  * 「现在」红线用到的布局度量。重叠组的列标题行高必须和 [EventLane] 里的标签一致。
  */
 private data class NowLineMetrics(
+    val plans: Map<TimelineItem.OverlapGroup, TimelineLayoutPlan>,
     val bottomPadPx: Float,
     val labelLinePx: Float,
     val laneHeaderPx: Float,
@@ -380,17 +419,9 @@ private fun computeNowY(
         val itemTopInViewport = (info.offset - viewportStart).toFloat()
         val withinItem = when (item) {
             is TimelineItem.OverlapGroup -> {
-                // 统一骨架映射(与卡片布局完全一致),红线随之插值。
-                val scale = overlapGroupScale(item, metrics.fontScale)
-                val (_, blocks) = planOverlapGroup(item, scale)
-                val flow = LaneFlow.place(blocks, item.startMinutes, scale, LaneScale.IDLE_GAP_MAX_DP)
-                LaneFlow.yFor(flow, now)?.let { yDp ->
+                metrics.plans[item]?.yFor(now)?.let { yDp ->
                     metrics.laneHeaderPx + yDp * metrics.pxPerDp
-                } ?: NowLinePlacement.inOverlapLane(
-                    headerPx = metrics.laneHeaderPx,
-                    laneHeightPx = span * scale * metrics.pxPerDp,
-                    fraction = frac,
-                )
+                } ?: metrics.laneHeaderPx
             }
             else -> NowLinePlacement.inItem(
                 itemHeightPx = info.size.toFloat(),
@@ -410,16 +441,16 @@ private fun computeNowY(
  * 位置由 LazyListState 可见 item 信息插值得出，随 now / 滚动实时移动。
  */
 @Composable
-private fun NowLine(y: Float) {
+private fun NowLine(y: Float, labelWidth: Dp) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .offset { IntOffset(0, y.toInt()) },
+            .offset { IntOffset(0, y.toInt()) }.testTag("now-line"),
     ) {
         // 横线：仅左侧留白（时间标签右缘 58.dp ~ 卡片左缘 90.dp），不压卡片。
         Box(
             modifier = Modifier
-                .padding(start = 58.dp)
+                .padding(start = labelWidth + 12.dp)
                 .width(32.dp)
                 .height(2.dp)
                 .background(ProgressRed),
@@ -428,7 +459,7 @@ private fun NowLine(y: Float) {
         // 圆点宽 10.dp，故左移 5.dp 让圆心正好落在节点中心线上，而非偏到右侧。
         Box(
             modifier = Modifier
-                .offset { IntOffset((74.dp - 5.dp).roundToPx(), (-4).dp.roundToPx()) }
+                .offset { IntOffset((labelWidth + 23.dp).roundToPx(), (-4).dp.roundToPx()) }
                 .size(10.dp)
                 .clip(CircleShape)
                 .background(ProgressRed),
@@ -437,13 +468,14 @@ private fun NowLine(y: Float) {
 }
 
 @Composable
-private fun TimelineNode(
+internal fun TimelineNode(
     isFirst: Boolean,
     isLast: Boolean,
     item: TimelineItem,
     content: @Composable () -> Unit,
 ) {
     val dark = LocalDarkTheme.current
+    val axisText = rememberAxisTextMetrics()
     val secondaryColor = MaterialTheme.colorScheme.secondary
         val nodeColor = remember(item, dark) {
         when (item) {
@@ -454,11 +486,11 @@ private fun TimelineNode(
     }
     val lineColor = MaterialTheme.colorScheme.outlineVariant
 
-    Row(
+    Layout(
         modifier = Modifier
             .fillMaxWidth()
             .drawBehind {
-                val centerX = (46.dp + 16.dp).toPx()
+                val centerX = (axisText.width + 16.dp).toPx()
                 val dotY = 21.dp.toPx()
                 val lineThickness = 2.dp.toPx()
 
@@ -484,10 +516,10 @@ private fun TimelineNode(
                     center = Offset(centerX, dotY),
                 )
             },
-    ) {
+        content = {
         Box(
             modifier = Modifier
-                .width(46.dp)
+                .width(axisText.width)
                 .fillMaxHeight(),
             contentAlignment = Alignment.TopEnd,
         ) {
@@ -499,25 +531,37 @@ private fun TimelineNode(
             ) {
                 Text(
                     text = TimeFormat.minutesToHm(item.startMinutes),
+                    maxLines = 1,
+                    softWrap = false,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     text = TimeFormat.minutesToHm(item.endMinutes),
+                    maxLines = 1,
+                    softWrap = false,
                     color = MaterialTheme.colorScheme.outline,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Normal,
                 )
             }
         }
-        Spacer(modifier = Modifier.width(32.dp))
         Box(
             modifier = Modifier
-                .weight(1f)
                 .padding(bottom = NowAxisBottomPad),
         ) {
             content()
+        }
+        },
+    ) { measurables, constraints ->
+        val axis = (axisText.width + 32.dp).roundToPx()
+        val body = measurables[1].measure(constraints.copy(minWidth = 0, minHeight = 0,
+            maxWidth = (constraints.maxWidth - axis).coerceAtLeast(0)))
+        val labels = measurables[0].measure(Constraints.fixed(axisText.width.roundToPx(), body.height))
+        layout(constraints.maxWidth, body.height) {
+            labels.placeRelative(0, 0)
+            body.placeRelative(axis, 0)
         }
     }
 }
@@ -561,7 +605,7 @@ private fun TypeMarkBadge(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EventCard(
+internal fun EventCard(
     item: TimelineItem.Event,
     nowMinutes: Int?,
     onClick: () -> Unit,
@@ -579,6 +623,18 @@ private fun EventCard(
     displayStart: Int? = null,
     displayEnd: Int? = null,
 ) {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val typography = MaterialTheme.typography
+    val regularPlan = remember(density, typography, item.event) {
+        fun height(style: androidx.compose.ui.text.TextStyle) = with(density) {
+            measurer.measure("团队 23:59", style, maxLines = 1).size.height.toDp().value
+        }
+        TimelineTextMetrics(time = maxOf(24f, height(typography.labelLarge),
+            if (item.event.completed) height(typography.labelSmall) + 4f else 0f),
+            title = height(typography.titleMedium), subtitle = height(typography.bodyMedium))
+            .regularContentPlan(320f, item.event.title.isNotBlank() && item.event.teamDisplay.isNotBlank())
+    }
     val event = item.event
     val shownStart = displayStart ?: event.startMinutes
     val shownEnd = displayEnd ?: event.endMinutes
@@ -597,8 +653,9 @@ private fun EventCard(
     Card(
         onClick = onClick,
         modifier = modifier
+            .testTag("event-card-${event.id}-$shownStart")
             .fillMaxWidth()
-            .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier),
+            .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier.heightIn(max = 320.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = cardContainer.copy(alpha = cardContainer.alpha * cardAlpha),
@@ -705,7 +762,7 @@ private fun EventCard(
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         // 概览卡限行防止长文本把卡片拉到数屏高，完整内容在详情 Sheet 里看。
-                        maxLines = if (narrow) titleMaxLines else 3,
+                        maxLines = if (narrow) titleMaxLines else regularPlan.titleLines,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -720,7 +777,7 @@ private fun EventCard(
                     )
                 }
 
-                if (event.title.isNotBlank() && event.teamDisplay.isNotBlank() && (showSubtitle || !narrow) && (timeLines > 0 || !narrow)) {
+                if (event.title.isNotBlank() && event.teamDisplay.isNotBlank() && (if (narrow) showSubtitle else regularPlan.showSubtitle) && (timeLines > 0 || !narrow)) {
                     Text(
                         text = event.title,
                         style = MaterialTheme.typography.bodyMedium,
@@ -762,43 +819,33 @@ private fun rememberBlinkAlpha(): Float {
 @Composable
 private fun ParallelEventCards(
     group: TimelineItem.OverlapGroup,
+    plan: TimelineLayoutPlan,
+    textMetrics: TimelineTextMetrics,
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
-    val fontScale = LocalDensity.current.fontScale
-    // 左右列共用比例尺与同一条时间骨架:同一时刻在左右两列永远等高,
-    // 先后顺序一眼可见;「现在」红线用同一份骨架映射,避免和卡片各算各的。
-    val scale = overlapGroupScale(group, fontScale)
-    val (segments, blocks) = planOverlapGroup(group, scale)
-    val layout = LaneFlow.place(blocks, group.startMinutes, scale, LaneScale.IDLE_GAP_MAX_DP)
-
+    val segments = plan.segments
+    val layout = plan.flow
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        GroupLane(
-            label = stringResource(R.string.event_type_performance),
-            items = group.performanceEvents,
-            itemOffset = 0,
-            segments = segments,
-            layout = layout,
-            fontScale = fontScale,
-            nowMinutes = nowMinutes,
-            onSelectEvent = onSelectEvent,
-            modifier = Modifier.weight(1f),
-        )
-        GroupLane(
-            label = stringResource(R.string.event_type_tokuten),
-            items = group.tokutenEvents,
-            itemOffset = group.performanceEvents.size,
-            segments = segments,
-            layout = layout,
-            fontScale = fontScale,
-            nowMinutes = nowMinutes,
-            onSelectEvent = onSelectEvent,
-            modifier = Modifier.weight(1f),
-        )
+        val ordered = group.performanceEvents + group.tokutenEvents
+        plan.columns.forEach { column ->
+            GroupLane(
+                label = stringResource(if (column.type == EventType.PERFORMANCE)
+                    R.string.event_type_performance else R.string.event_type_tokuten),
+                items = ordered.subList(column.eventOffset, column.eventOffset + column.eventCount),
+                itemOffset = column.eventOffset,
+                segments = segments,
+                layout = layout,
+                textMetrics = textMetrics,
+                nowMinutes = nowMinutes,
+                onSelectEvent = onSelectEvent,
+                modifier = Modifier.weight(column.widthFraction),
+            )
+        }
     }
 }
 
@@ -808,111 +855,6 @@ private fun LaneSegments.Segment.coveredIndices(): List<Int> = when (this) {
     is LaneSegments.Segment.Overlap -> indices
 }
 
-/**
- * 统一时间骨架:两列日程合并切片(跨类型),每个切片给两列同一个 offset 与高度。
- * 切片高度取两列需求的最大值:比例高度(限高 320dp)与最低可读下限
- * (单卡「单行时间 + 一行团队名」、重叠块「头部 + 一条条目」)——短卡不再丢团队名。
- */
-private fun planOverlapGroup(
-    group: TimelineItem.OverlapGroup,
-    scale: Float,
-): Pair<List<LaneSegments.Segment>, List<LaneFlow.LaneBlock>> {
-    val perfItems = group.performanceEvents
-    val tokItems = group.tokutenEvents
-    val segments = LaneSegments.slice(
-        (perfItems + tokItems).map { it.event.startMinutes to it.event.endMinutes },
-    )
-    val blocks = segments.map { segment ->
-        val covered = segment.coveredIndices()
-        // 统一换算成「列内下标」:演出列全局下标即列内下标,特典列需减去演出列条数。
-        val inPerf = covered.filter { it < perfItems.size }
-        val inTok = covered.filter { it >= perfItems.size }.map { it - perfItems.size }
-        val proportional = ((segment.endMinutes - segment.startMinutes).coerceAtLeast(1) * scale)
-            .coerceAtMost(LaneScale.MAX_CARD_DP)
-        val perfNeed = when {
-            inPerf.isEmpty() -> 0f
-            inPerf.size == 1 -> {
-                val event = perfItems[inPerf[0]].event
-                LaneScale.minSlotDp(
-                    completed = event.completed,
-                    hasSubtitle = event.title.isNotBlank() && event.teamDisplay.isNotBlank(),
-                )
-            }
-            else -> LaneScale.overlapFullSlotDp(inPerf.size)
-        }
-        val tokNeed = when {
-            inTok.isEmpty() -> 0f
-            inTok.size == 1 -> {
-                val event = tokItems[inTok[0]].event
-                LaneScale.minSlotDp(
-                    completed = event.completed,
-                    hasSubtitle = event.title.isNotBlank() && event.teamDisplay.isNotBlank(),
-                )
-            }
-            else -> LaneScale.overlapFullSlotDp(inTok.size)
-        }
-        LaneFlow.LaneBlock(
-            start = segment.startMinutes,
-            end = segment.endMinutes,
-            height = maxOf(proportional, perfNeed, tokNeed),
-        )
-    }
-    return segments to blocks
-}
-
-private fun overlapGroupScale(group: TimelineItem.OverlapGroup, fontScale: Float): Float {
-    val laneMinutes = (group.endMinutes - group.startMinutes).coerceAtLeast(1)
-    val blocks = laneBlocks(group.performanceEvents) + laneBlocks(group.tokutenEvents)
-    return LaneScale.resolve(laneMinutes, blocks, fontScale)
-}
-
-/** 有重叠的列按重叠片（合并块）计算占位，无重叠时按整卡计算。 */
-private fun laneBlocks(events: List<TimelineItem.Event>): List<LaneScale.Block> {
-    if (events.isEmpty()) return emptyList()
-    val segments = LaneSegments.slice(events.map { it.event.startMinutes to it.event.endMinutes })
-    val hasOverlap = segments.any { it is LaneSegments.Segment.Overlap }
-    return if (hasOverlap) {
-        segments.map { it.toLaneBlock(events) }
-    } else {
-        events.map { it.event.toLaneBlock() }
-    }
-}
-
-private fun ScheduleEvent.toLaneBlock(minutes: Int = endMinutes - startMinutes): LaneScale.Block =
-    LaneScale.Block(
-        minutes = minutes.coerceAtLeast(1),
-        minHeightDp = LaneScale.singleSlotDp(
-            completed = completed,
-            hasSubtitle = title.isNotBlank() && teamDisplay.isNotBlank(),
-        ),
-    )
-
-private fun LaneSegments.Segment.toLaneBlock(items: List<TimelineItem.Event>): LaneScale.Block {
-    val minutes = (endMinutes - startMinutes).coerceAtLeast(1)
-    return when (this) {
-        is LaneSegments.Segment.Single -> items[index].event.toLaneBlock(minutes)
-        is LaneSegments.Segment.Overlap -> LaneScale.Block(
-            minutes = minutes,
-            minHeightDp = LaneScale.overlapSlotDp(indices.size),
-        )
-    }
-}
-
-/** 重叠块头部时间：块高放得下就两行，矮块降为单行；再矮由条目区直接占满。 */
-private fun sliceTimeLines(slotHeight: Float): Int {
-    val available = slotHeight - 2 * LaneScale.NARROW_PADDING_V_DP
-    return when {
-        available >= LaneScale.TIME_BLOCK_DP + 0.5f -> 2
-        available >= LaneScale.TIME_LINE_DP + 0.5f -> 1
-        else -> 0
-    }
-}
-
-/**
- * 单列渲染:沿统一骨架放置本列的卡片。
- * 骨架切片里本列有卡就画(单卡 / 多卡合并块),没有就留空——
- * 卡片的纵向位置完全由骨架决定,跨列先后顺序与同时刻对齐因此成立。
- */
 @Composable
 private fun GroupLane(
     label: String,
@@ -920,12 +862,12 @@ private fun GroupLane(
     itemOffset: Int,
     segments: List<LaneSegments.Segment>,
     layout: LaneFlow.Layout,
-    fontScale: Float,
+    textMetrics: TimelineTextMetrics,
     nowMinutes: Int?,
     onSelectEvent: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier) {
+    Column(modifier = modifier.testTag("lane-$label")) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall.copy(lineHeight = 16.sp),
@@ -954,12 +896,11 @@ private fun GroupLane(
                     .padding(bottom = PARALLEL_CARD_GAP)
                 if (colIndices.size == 1) {
                     val item = items[colIndices[0]]
-                    val plan = LaneScale.cardContentPlan(
-                        availableDp = slot.height - LaneScale.CARD_GAP_DP,
+                    val plan = textMetrics.contentPlan(
+                        available = slot.height - LaneScale.CARD_GAP_DP,
                         completed = item.event.completed,
-                        hasSubtitle = item.event.title.isNotBlank() &&
+                        subtitle = item.event.title.isNotBlank() &&
                             item.event.teamDisplay.isNotBlank(),
-                        fontScale = fontScale,
                     )
                     EventCard(
                         item = item,
@@ -982,7 +923,7 @@ private fun GroupLane(
                         endMinutes = segment.endMinutes,
                         nowMinutes = nowMinutes,
                         onSelectEvent = onSelectEvent,
-                        timeLines = sliceTimeLines(slot.height),
+                        timeLines = 1,
                         modifier = segmentModifier,
                     )
                 }
@@ -1185,8 +1126,13 @@ internal fun EventDetailSheet(
     onEdit: () -> Unit,
     onDismiss: () -> Unit,
     onCompleteTokuten: (() -> Unit)? = null,
+    busy: Boolean = false,
+    failed: Boolean = false,
+    sheetMaxWidth: Dp = androidx.compose.material3.BottomSheetDefaults.SheetMaxWidth,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val busyNow by rememberUpdatedState(busy)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+        confirmValueChange = { it != androidx.compose.material3.SheetValue.Hidden || !busyNow })
     val event = item.event
     val dark = LocalDarkTheme.current
     val colors = remember(event.eventType, event.tokutenKind, dark) {
@@ -1209,14 +1155,17 @@ internal fun EventDetailSheet(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!busy) onDismiss() },
         sheetState = sheetState,
+        sheetMaxWidth = sheetMaxWidth,
     ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 96.dp),
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1369,36 +1318,22 @@ internal fun EventDetailSheet(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else if (onCompleteTokuten != null) {
-                        Button(
-                            onClick = onCompleteTokuten,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.action_complete_event))
-                        }
                     }
                 }
             }
 
-            // 左下角编辑悬浮按钮：从概览卡进入详情后，再进入编辑页。
-            SmallFloatingActionButton(
-                onClick = onEdit,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(20.dp),
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = stringResource(R.string.cd_edit_event),
-                )
+            if (failed) Text(stringResource(R.string.operation_failed),
+                color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 24.dp))
+            Row(modifier = Modifier.fillMaxWidth().padding(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                SmallFloatingActionButton(onClick = { if (!busy) onEdit() }) {
+                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.cd_edit_event))
+                }
+                if (onCompleteTokuten != null && !event.completed) {
+                    Button(onClick = onCompleteTokuten, enabled = !busy, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.action_complete_event))
+                    }
+                }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.lamuier.scheduletimeline.ui.edit
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -32,6 +33,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -69,24 +71,28 @@ import com.lamuier.scheduletimeline.ui.theme.eventTypeColors
 @Composable
 fun EditEventScreen(
     eventId: Long?,
+    sessionId: String,
     viewModel: ScheduleViewModel,
     onBack: () -> Unit,
 ) {
     val state by viewModel.editUiState.collectAsStateWithLifecycle()
+    val writeState by viewModel.writeState.collectAsStateWithLifecycle()
     val teams by viewModel.teams.collectAsStateWithLifecycle()
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var pickingStart by remember { mutableStateOf(false) }
     var pickingEnd by remember { mutableStateOf(false) }
     var teamToDelete by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(eventId) {
-        viewModel.prepareEdit(eventId)
+    BackHandler(enabled = writeState.busy) { }
+    LaunchedEffect(sessionId) {
+        viewModel.prepareEdit(eventId, sessionId)
     }
 
     EditEventContent(
-        state = state,
+        state = if (writeState.failed) state.copy(error = EditValidationError.WriteFailed) else state,
+        busy = writeState.busy || state.error == EditValidationError.Loading,
         teamNames = teams.map { it.name },
-        onBack = onBack,
+        onBack = { if (!writeState.busy) onBack() },
         onEventTypeChange = viewModel::setEditEventType,
         onTokutenKindChange = { kind ->
             viewModel.updateEdit { s -> s.copy(tokutenKind = kind) }
@@ -183,6 +189,7 @@ fun EditEventScreen(
 @Composable
 private fun EditEventContent(
     state: EditUiState,
+    busy: Boolean = false,
     teamNames: List<String>,
     onBack: () -> Unit,
     onEventTypeChange: (EventType) -> Unit,
@@ -223,7 +230,8 @@ private fun EditEventContent(
                 actions = {
                     // 保存移到右上角（原来在底部），删除移到列表底部——删除更不易误触。
                     if (!state.isNew) {
-                        IconButton(onClick = onSave) {
+                        IconButton(onClick = onSave,
+                enabled = !busy && (state.isNew || state.loadedId != 0L)) {
                             Icon(
                                 Icons.Default.Check,
                                 contentDescription = stringResource(R.string.action_save_event),
@@ -231,7 +239,7 @@ private fun EditEventContent(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                 ),
@@ -246,6 +254,7 @@ private fun EditEventContent(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+            if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(R.string.edit_label_event_type),
@@ -254,11 +263,13 @@ private fun EditEventContent(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
+                        enabled = !busy,
                         selected = state.eventType == EventType.PERFORMANCE,
                         onClick = { onEventTypeChange(EventType.PERFORMANCE) },
                         label = { Text(stringResource(R.string.event_type_performance)) },
                     )
                     FilterChip(
+                        enabled = !busy,
                         selected = state.eventType == EventType.TOKUTEN,
                         onClick = { onEventTypeChange(EventType.TOKUTEN) },
                         label = { Text(stringResource(R.string.event_type_tokuten)) },
@@ -276,6 +287,7 @@ private fun EditEventContent(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TokutenKind.entries.forEach { kind ->
                             FilterChip(
+                        enabled = !busy,
                                 selected = state.tokutenKind == kind,
                                 onClick = { onTokutenKindChange(kind) },
                                 label = {
@@ -343,6 +355,7 @@ private fun EditEventContent(
                     }
                 }
                 OutlinedTextField(
+                enabled = !busy,
                     value = state.teamInput,
                     onValueChange = onTeamInputChange,
                     placeholder = {
@@ -379,6 +392,7 @@ private fun EditEventContent(
             }
 
             OutlinedTextField(
+                enabled = !busy,
                 value = state.title,
                 onValueChange = onTitleChange,
                 label = { Text(stringResource(R.string.edit_label_session)) },
@@ -389,6 +403,7 @@ private fun EditEventContent(
             )
 
             OutlinedTextField(
+                enabled = !busy,
                 value = state.location,
                 onValueChange = onLocationChange,
                 label = { Text(stringResource(R.string.edit_label_location)) },
@@ -412,13 +427,13 @@ private fun EditEventContent(
                     TimeField(
                         label = stringResource(R.string.edit_label_start),
                         minutes = state.startMinutes,
-                        onClick = onPickStart,
+                        onClick = { if (!busy) onPickStart() },
                         modifier = Modifier.weight(1f),
                     )
                     TimeField(
                         label = stringResource(R.string.edit_label_end),
                         minutes = state.endMinutes,
-                        onClick = onPickEnd,
+                        onClick = { if (!busy) onPickEnd() },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -441,6 +456,7 @@ private fun EditEventContent(
             }
 
             OutlinedTextField(
+                enabled = !busy,
                 value = state.note,
                 onValueChange = onNoteChange,
                 label = { Text(stringResource(R.string.edit_label_note)) },
@@ -459,7 +475,10 @@ private fun EditEventContent(
                     Text(
                         text = stringResource(
                             when (error) {
-                                EditValidationError.BlankTeam -> R.string.edit_error_blank_team
+                                EditValidationError.WriteFailed -> R.string.operation_failed
+                        EditValidationError.Loading -> R.string.operation_loading
+                        EditValidationError.MissingEvent -> R.string.event_missing
+                        EditValidationError.BlankTeam -> R.string.edit_error_blank_team
                                 EditValidationError.MissingTokutenKind ->
                                     R.string.edit_error_missing_tokuten_kind
                                 EditValidationError.EndBeforeStart ->
@@ -478,6 +497,7 @@ private fun EditEventContent(
                 // 已有事件：底部放删除（ destructive 风格），与右上角保存互换。
                 Button(
                     onClick = onRequestDelete,
+                    enabled = !busy,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -502,6 +522,7 @@ private fun EditEventContent(
                 // 新建事件：无删除，底部仍是保存。
                 Button(
                     onClick = onSave,
+                enabled = !busy,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -568,8 +589,8 @@ private fun TimePickerDialog(
     onDismiss: () -> Unit,
 ) {
     val pickerState = rememberTimePickerState(
-        initialHour = initialMinutes / 60,
-        initialMinute = initialMinutes % 60,
+        initialHour = initialMinutes.coerceIn(0, 1439) / 60,
+        initialMinute = initialMinutes.coerceIn(0, 1439) % 60,
         is24Hour = true,
     )
     AlertDialog(

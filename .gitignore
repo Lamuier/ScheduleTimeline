@@ -87,3 +87,6 @@ test-results/
 # ---- Misc tooling ----
 .navigation/
 node_modules/
+
+.signing/
+__pycache__/

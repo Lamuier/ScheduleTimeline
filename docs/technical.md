@@ -4,19 +4,23 @@
 
 ## 构建 APK
 
-统一入口为 `build.ps1`：
+Windows 使用 `build.ps1`，macOS / Linux 使用 `build.sh`；两者交给标准库 Python 3.9+ 的 `scripts/build_support.py` 执行相同流程。需要完整且仍维护的 JDK 17+ 修订版、Android SDK 37 与 Build Tools 37.0.0：
 
 ```powershell
 .\build.ps1                 # Debug
 .\build.ps1 -Install        # Debug + adb 安装（独立包名，不覆盖 Release）
 .\build.ps1 -Release        # Release 签名打包到 dist/
-.\build.ps1 -SetupSigning   # 配置/重绑签名
+.\build.ps1 -SetupSigning   # 显式绑定已有原签名
 .\build.ps1 -Help           # 参数说明（也支持 --help）
 ```
 
 启动时会打印「生效参数」（模式、Clean / SkipChecks / Gradle 离线是否生效等）；Gradle 实际命令行也会写出。
 
-默认会跑单测与 lint；加 `-SkipChecks` 可跳过。需要干净构建时加 `-Clean`。
+Debug 与 Release 均默认离线，可用 `-Online` / `--online` 下载缺失依赖。macOS / Linux 运行 `bash build.sh`（Debug）、`bash build.sh --release`（正式包）、`bash build.sh --release --online` 或 `bash build.sh --release --doctor`（只预检、不下载）。
+
+可用 `-JavaHome` / `--java-home` 指定维护中的 JDK。本机早期 OpenJDK 17 GA 在 Lint 的 C2 编译阶段复现过 JVM 崩溃，验收改用官方 SHA-256 验证过的 Temurin 17 修订版；这不改变应用 JVM 目标 17。
+
+默认会跑单测与 Debug Lint；Release 另跑 Release Vital Lint；加 `-SkipChecks` 可跳过。需要干净构建时加 `-Clean`。
 
 | 产物 | 路径 | applicationId |
 | --- | --- | --- |
@@ -27,18 +31,33 @@
 
 ### Release 签名
 
-密钥不进仓库。签名元数据在 `%LOCALAPPDATA%\ScheduleTimeline\signing\`。首次 `-Release` 若尚未配置，会自动绑定本机 `debug.keystore`（仅便于本机安装）。上架前请绑定正式密钥：
+密钥与密码不进仓库。默认本机元数据在被忽略的 `.signing/`（可用 `-SigningRoot` / `--signing-root` 指定）。未配置时 Release 会停止；必须沿用原密钥，并校验证书固定指纹及实际私钥签名操作。不会自动绑定 Debug 签名或生成新密钥。
+
+使用已有 UTF-8 单行凭据文件（保留密码本身的空格，只去掉末尾换行；限制为本机用户可读），项目元数据只引用其路径：
 
 ```powershell
 .\build.ps1 -SetupSigning `
   -AdoptKeystore "C:\path\to\release.keystore" `
   -KeyAlias "release" `
-  -StorePassword "<pass>"
+  -CredentialFile "C:\private\release-password.txt" `
+  -CertificateSha256 "<原证书 SHA-256>"
 
 .\build.ps1 -Release -Online
 ```
 
-`build.ps1 -Release` 会注入 `ANDROID_RELEASE_*` 环境变量；`app/build.gradle.kts` 据此配置 `signingConfigs.release`。相关环境变量：
+旧 `-StorePassword`、`-GenerateNewKey`、`-AdoptDebugKeystore`、`-ForceRebind` 参数会给出迁移提示并停止；Windows DPAPI / `.clixml` 密码容器不可跨系统使用，改用同一原密码的私有文件。原有 `-Install / -Release / -Clean / -Offline / -Online / -SkipChecks / -SigningRoot / -Help` 开关继续支持。
+
+macOS / Linux 绑定命令：
+
+```bash
+bash build.sh --setup-signing --adopt-keystore /private/path/release.keystore \
+  --key-alias release --credential-file /private/path/release-password.txt \
+  --certificate-sha256 <原证书SHA256>
+```
+
+入口会校验 APK 原签名、包名、版本、SDK、ABI、非 debuggable、安全默认值、ZIP/ELF 16 KiB 对齐、CRC 和非空 R8 mapping。通过后才发布到 dist；失败保留已有产物，并导出 SHA-256 与 build.json。共享逻辑测试使用 `python3 -m unittest discover -s scripts/tests -v`。
+
+`build.ps1 -Release` / `build.sh --release` 会注入 `ANDROID_RELEASE_*` 环境变量；`app/build.gradle.kts` 据此配置 `signingConfigs.release`。相关环境变量：
 
 ```text
 ANDROID_RELEASE_STORE_FILE
@@ -78,7 +97,10 @@ versionName = "X.Y.Z"
 - 导入页长按样例会复制**含表头**的示例；解析时自动跳过标题行。
 - 兼容旧 9 列格式（无完成列）。
 - 兼容旧 10 列格式；原「关联演出开始时间」列（时钟值）会被忽略。
-- 兼容旧 7 列格式（标题 → 团队，分类 → 类型推断）。
+- 兼容旧 6–7 列格式（标题 → 团队，分类 → 类型推断）。
+- `ImportParseResult` 返回有效草稿（带原始行号）与错误枚举；有效时间为 00:00–23:59，结束必须晚于开始。未知结束留空并提示，不引入跨午夜或结束待定语义。
+- 合并对重复导入保持幂等；不会清洗历史备注。保存、导入、清空均先完成事务再关闭页面；特典完成只更新该字段。
+- 旧异常时间记录保留可编辑入口，但排除比例、统计和提醒。
 
 「清空全部数据」不可恢复。
 
@@ -88,7 +110,7 @@ versionName = "X.Y.Z"
 
 ## 技术栈
 
-Kotlin · Jetpack Compose · Material 3 · MVVM（ViewModel + StateFlow + Repository） · Room
+Kotlin · Jetpack Compose BOM 2026.08.00 / Material 3 1.4.0 · MVVM（ViewModel + StateFlow + Repository） · Room
 
 - 最低 API 26 · 编译 API 37 · 目标 API 37（Android 17）
 - ABI 仅 `arm64-v8a`
@@ -100,8 +122,10 @@ Kotlin · Jetpack Compose · Material 3 · MVVM（ViewModel + StateFlow + Reposi
 
 ```text
 ScheduleTimeline/
-├── build.ps1                     ← 唯一构建入口
-├── AGENTS.md / CHANGELOG.md
+├── build.ps1 / build.sh          ← 跨平台入口
+├── scripts/build_support.py      ← 环境、签名、检查、导出
+├── build-policy.json             ← ABI / 权限 / Release 内容校验
+├── CHANGELOG.md
 ├── docs/
 │   ├── UI-design.md              ← UI 设计规范
 │   └── hyperisland-live-updates.md  ← Live Updates / 超级岛适配
@@ -115,3 +139,15 @@ ScheduleTimeline/
 │       └── ui/timeline|edit|theme/
 └── app/src/test/                 ← TimelineBuilder / ChartLayout / ScheduleExport
 ```
+
+## 时间、布局与调度
+
+`ScheduleTimeSnapshot` 使用可注入 Clock 与时区，前台恢复立即刷新，跨午夜只更新今天身份。分页以日期作为稳定标识，远日期重新设置中心；编辑会话按导航条目绑定，草稿与所属日期经 SavedStateHandle 同步保存。
+
+`TimelineLayoutPlan` 输出统一切片、高度与时间到纵坐标的映射；所有重叠簇进入切片，首尾相接分开。同类型全宽，混合类型双列。Compose 使用文字实测高度和宽度，卡片与红线共用映射，标签按卡片实测高度定位。
+
+提醒使用持久化 `ReminderState` 与 `ReminderBatch`，刷新串行执行，广播处理前重新核对数据库。已安排的延迟提醒仅在未开场时补发并按事件合并；新录入不补历史提醒。事件改期、删除、完成及关闭通知会清理旧提醒。日期与时刻组合后经 `atZone` 转时间戳，系统时间、时区、重启与更新后重算。精确闹钟权限不可用时回退非精确闹钟，送达时间仍受系统限制，参见 [Android 闹钟文档](https://developer.android.com/develop/background-work/services/alarms)。
+
+有已放置小组件时，关闭通知仍安排事件边界和跨日刷新；两者都无需求则停止。列表以事件 ID 作为稳定 ID，不同通知、小组件及完成动作使用独立 Intent 身份。
+
+回归验收包括 JVM 算法、Room 事务失败、SavedState 草稿恢复，以及 Robolectric/Compose 的 320 / 360 / 600dp、100% / 150% / 200% 字体与深浅主题矩阵。默认不用模拟器与真机；Windows/Linux 分支通过脚本单测，实机构建结果以实际运行平台为准。

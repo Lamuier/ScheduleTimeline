@@ -50,6 +50,7 @@ class NowLinePlacementTest {
         // 起始标签占 0..label。红线要落到标签下方，不能盖住 15:40。
         assertTrue(y > label)
         val startCenter = label / 2f
-        assertEquals(startCenter + elapsed * LaneScale.IDEAL_PX_PER_MINUTE, y, 0.01f)
+        assertEquals(80f, contentMin, 0.01f)
+        assertEquals(startCenter + (80f - label) * elapsed / minutes, y, 0.01f)
     }
 }

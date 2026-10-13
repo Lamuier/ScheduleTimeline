@@ -22,6 +22,9 @@ interface ScheduleEventDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(events: List<ScheduleEvent>)
 
+    @Query("UPDATE schedule_events SET completed = :completed WHERE id = :id AND eventType = 'TOKUTEN'")
+    suspend fun setTokutenCompleted(id: Long, completed: Boolean): Int
+
     @Update
     suspend fun update(event: ScheduleEvent)
 

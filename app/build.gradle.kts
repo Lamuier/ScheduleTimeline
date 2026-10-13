@@ -28,8 +28,8 @@ android {
         applicationId = "com.lamuier.scheduletimeline"
         minSdk = 26
         targetSdk = 37
-        versionCode = 27
-        versionName = "1.13.0"
+        versionCode = 28
+        versionName = "1.14.0"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }
@@ -75,6 +75,8 @@ android {
         }
     }
 
+    testOptions { unitTests.isIncludeAndroidResources = true }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -114,6 +116,11 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test:core:1.7.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation(libs.org.json)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "allowedAbis": ["arm64-v8a"],
+  "allowedPermissions": [
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.POST_PROMOTED_NOTIFICATIONS",
+    "android.permission.SCHEDULE_EXACT_ALARM",
+    "android.permission.RECEIVE_BOOT_COMPLETED",
+    "${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+  ],
+  "forbiddenDexStrings": ["org/robolectric/", "org/junit/", "UiReviewActivity"]
+}

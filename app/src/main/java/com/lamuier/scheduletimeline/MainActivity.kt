@@ -81,6 +81,9 @@ class MainActivity : ComponentActivity() {
                 // 桌面 Shortcut：新增日程 / 今日日程 / 最近日程
                 val shortcutAction by pendingShortcutAction
                 LaunchedEffect(shortcutAction) {
+                    if (shortcutAction in listOf(AppShortcuts.ACTION_TODAY, AppShortcuts.ACTION_NEXT_SCHEDULED, AppShortcuts.ACTION_IMPORT)) {
+                        navController.popBackStack("timeline", inclusive = false)
+                    }
                     when (shortcutAction) {
                         AppShortcuts.ACTION_ADD_EVENT -> {
                             // 固定为今天新增，避免沿用上次停留的非今日日期
@@ -130,8 +133,9 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
-                    composable("edit") {
+                    composable("edit") { entry ->
                         EditEventScreen(
+                            sessionId = entry.id,
                             eventId = null,
                             viewModel = viewModel,
                             onBack = { navController.popBackStack() },
@@ -145,6 +149,7 @@ class MainActivity : ComponentActivity() {
                     ) { entry ->
                         val id = entry.arguments?.getLong("eventId")
                         EditEventScreen(
+                            sessionId = entry.id,
                             eventId = id,
                             viewModel = viewModel,
                             onBack = { navController.popBackStack() },
@@ -153,6 +158,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (application as ScheduleApplication).refreshNotifications()
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -29,5 +29,6 @@ object NowLinePlacement {
      * [labelLineDp] 是起始时间标签的行高，要算进内容区，时间跨度才落在两条标签之间。
      */
     fun liveGapContentMinDp(minutes: Int, labelLineDp: Float = 16f): Float =
-        minutes.coerceAtLeast(1) * LaneScale.IDEAL_PX_PER_MINUTE + labelLineDp
+        (minutes.coerceAtLeast(1) * LaneScale.IDEAL_PX_PER_MINUTE + labelLineDp)
+            .coerceAtMost(LaneScale.IDLE_GAP_MAX_DP)
 }

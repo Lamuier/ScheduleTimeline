@@ -179,4 +179,16 @@
     <string name="shortcut_next_long">查看未来最近日程</string>
     <string name="shortcut_import_short">批量导入</string>
     <string name="shortcut_import_long">批量导入 CSV 日程</string>
+    <string name="operation_failed">操作未完成，请重试；输入内容已保留。</string>
+    <string name="operation_loading">正在读取日程…</string>
+    <string name="event_missing">这项日程已不存在，请返回时间轴。</string>
+    <string name="invalid_saved_event">%1$s：时间异常，点击修正</string>
+    <string name="import_error_row">第 %1$d 行：%2$s</string>
+    <string name="import_error_fields">列数不正确</string>
+    <string name="import_error_date">日期无效</string>
+    <string name="import_error_team">团队不能为空</string>
+    <string name="import_error_time">请补充有效的开始和结束时间</string>
+    <string name="import_error_interval">结束时间必须晚于开始时间，不支持跨午夜</string>
+    <string name="import_error_type">类型只能是演出或特典</string>
+    <string name="import_error_quoting">CSV 引号未闭合</string>
 </resources>

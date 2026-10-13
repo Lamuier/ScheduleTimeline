@@ -1,5 +1,16 @@
 package com.lamuier.scheduletimeline.notification
 
+import java.time.Clock
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import com.lamuier.scheduletimeline.data.ReminderPlanner
+import com.lamuier.scheduletimeline.data.ReminderState
+import com.lamuier.scheduletimeline.data.ReminderBatch
+import com.lamuier.scheduletimeline.data.ScheduledReminder
+import com.lamuier.scheduletimeline.data.BoundarySchedule
+import com.lamuier.scheduletimeline.data.key
+import com.lamuier.scheduletimeline.widget.ScheduleWidgetUpdater
+import android.net.Uri
 import android.Manifest
 import android.app.AlarmManager
 import android.app.Notification
@@ -36,12 +47,15 @@ class ScheduleNotificationCoordinator(
     context: Context,
     private val repository: ScheduleRepository,
     private val preferences: NotificationPreferences,
+    private val clock: Clock = Clock.systemUTC(),
 ) {
     private val appContext = context.applicationContext
     private val notificationManager =
         appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    private val zone = ZoneId.systemDefault()
+    private val zone get() = ZoneId.systemDefault()
+    private val mutex = Mutex()
+    private val reminderStore = ReminderStore(appContext)
     private val dateFormatter = DateTimeFormatter.ofPattern(
         appContext.getString(R.string.date_pattern),
     )
@@ -53,18 +67,27 @@ class ScheduleNotificationCoordinator(
      * 因此这里不用任何 span，直接把类型单字以「类型字·团队名」的纯文本形式写入标题/正文，
      * 既避免跨进程丢失，也天然把「演/特」与团队名用「·」隔开、区分清楚。
      */
-    suspend fun refresh() {
+    suspend fun refresh() = mutex.withLock { refreshLocked() }
+
+    private suspend fun refreshLocked() {
         ensureChannel()
         ensureReminderChannel()
+        val events = repository.allEvents()
+        val now = clock.millis()
         if (!preferences.enabled.value || !canPostNotifications()) {
-            notificationManager.cancel(LIVE_NOTIFICATION_ID)
-            cancelBoundaryAlarm()
+            notificationManager.cancelAll()
             cancelReminderAlarm()
+            reminderStore.write(ReminderState())
+            scheduleNextBoundary(events, now, 60_000L)
             return
         }
-
-        val events = repository.allEvents()
-        val now = System.currentTimeMillis()
+        val decision = ReminderPlanner.plan(events, now, zone, reminderStore.read())
+        notificationManager.activeNotifications.filter {
+            (it.notification.channelId == REMINDER_CHANNEL_ID && it.tag == null) ||
+                (it.tag?.startsWith(REMINDER_TAG) == true && it.tag.removePrefix(REMINDER_TAG) !in decision.validKeys)
+        }.forEach { notificationManager.cancel(it.tag, it.id) }
+        decision.deliver.forEach { postReminder(it) }
+        reminderStore.write(decision.state)
         val active = NotificationSchedule.activeAt(events, now, zone)
         if (active.isEmpty()) {
             val upcoming = if (preferences.alwaysOn.value) {
@@ -96,7 +119,7 @@ class ScheduleNotificationCoordinator(
             )
         }
         scheduleNextBoundary(events, now, progressRefreshIntervalMs(events, now, zone))
-        scheduleNextReminder(events, now)
+        scheduleNextReminder(decision.next)
     }
 
     /**
@@ -104,38 +127,20 @@ class ScheduleNotificationCoordinator(
      * （非常驻、5 分钟自动消失），随后 refresh 调度下一个提醒。
      * 事件已被删除/改期时跳过发通知，仅推进调度。
      */
-    suspend fun handleReminder(intent: Intent?) {
-        val eventId = intent?.getLongExtra(EXTRA_EVENT_ID, -1L) ?: -1L
-        val kindOrdinal = intent?.getIntExtra(EXTRA_REMINDER_KIND, -1) ?: -1
-        val kind = ReminderKind.entries.getOrNull(kindOrdinal)
+    suspend fun handleReminder(@Suppress("UNUSED_PARAMETER") intent: Intent?) = refresh()
 
-        if (eventId > 0 && kind != null &&
-            preferences.enabled.value && canPostNotifications()
-        ) {
-            val event = repository.allEvents().firstOrNull { it.id == eventId }
-            if (event != null && !event.completed) {
-                postReminder(event, kind)
-            }
-        }
-        refresh()
+    suspend fun handleComplete(intent: Intent?) = mutex.withLock {
+        val eventId = intent?.getLongExtra(EXTRA_EVENT_ID, -1L) ?: -1L
+        if (eventId > 0) repository.setTokutenCompleted(eventId, completed = true)
+        refreshLocked()
     }
 
-    /**
-     * 特典「完成」动作：标记后该日程不再进入常驻通知与关键时间点提醒，
-     * 已弹出的提醒一并取消，再 refresh 重算当前 Live Update。
-     */
-    suspend fun handleComplete(intent: Intent?) {
-        val eventId = intent?.getLongExtra(EXTRA_EVENT_ID, -1L) ?: -1L
-        if (eventId > 0) {
-            if (repository.setTokutenCompleted(eventId, completed = true)) {
-                cancelRemindersFor(eventId)
-            }
-        }
-        refresh()
-    }
-
-    private fun postReminder(event: ScheduleEvent, kind: ReminderKind) {
+    private suspend fun postReminder(reminder: ScheduledReminder) {
+        val event = repository.get(reminder.event.id) ?: return
+        if (reminder.copy(event = event).key != reminder.key || event.completed) return
+        val kind = reminder.kind
         val window = NotificationSchedule.windows(listOf(event), zone).firstOrNull() ?: return
+        if (window.startMillis <= clock.millis()) return
         val start = Instant.ofEpochMilli(window.startMillis).atZone(zone)
         val startTime = TimeFormat.minutesToHm(start.hour * 60 + start.minute)
         val text = when (kind) {
@@ -160,7 +165,7 @@ class ScheduleNotificationCoordinator(
         val contentIntent = PendingIntent.getActivity(
             appContext,
             REMINDER_CONTENT_REQUEST_CODE,
-            launchIntent,
+            launchIntent.setAction("${appContext.packageName}.OPEN_REMINDER").setData(Uri.parse("schedule://reminder/${event.id}")),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -174,13 +179,14 @@ class ScheduleNotificationCoordinator(
             .setCategory(Notification.CATEGORY_REMINDER)
             // 行程属敏感个人信息：锁屏隐藏详情，仅显示应用名
             .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .setShowWhen(true)
-            .setWhen(System.currentTimeMillis())
+            .setWhen(clock.millis())
             .setTimeoutAfter(REMINDER_AUTO_DISMISS_MILLIS)
             .build()
         val notificationId = reminderNotificationId(event.id, kind)
-        runCatching { notificationManager.notify(notificationId, notification) }
+        notificationManager.notify(REMINDER_TAG + reminder.key, notificationId, notification)
     }
 
     /**
@@ -306,7 +312,7 @@ class ScheduleNotificationCoordinator(
         val contentIntent = PendingIntent.getActivity(
             appContext,
             CONTENT_REQUEST_CODE,
-            launchIntent,
+            launchIntent.setAction("${appContext.packageName}.OPEN_LIVE"),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -513,22 +519,14 @@ class ScheduleNotificationCoordinator(
         nowMillis: Long,
         intervalMs: Long,
     ) {
-        val next = NotificationSchedule.nextRefreshAt(
-            events, nowMillis, zone, intervalMs,
-        )
+        val next = BoundarySchedule.next(events, nowMillis, zone,
+            notifications = preferences.enabled.value && canPostNotifications(),
+            widgets = ScheduleWidgetUpdater.hasWidgets(appContext), intervalMs = intervalMs)
         val pendingIntent = boundaryPendingIntent()
         alarmManager.cancel(pendingIntent)
         if (next != null) {
-            // 用精确闹钟：setAndAllowWhileIdle 的一次性闹钟在设备低活跃分桶下会被系统
-            // 批处理/节流到数分钟一次，导致进度条每次可见更新跨度过大（看起来像一下跳 20%）。
-            // setExactAndAllowWhileIdle 不被分桶延迟，进度条得以按设定间隔平滑推进。
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                !alarmManager.canScheduleExactAlarms()
-            ) {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pendingIntent)
-            } else {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pendingIntent)
-            }
+            scheduleAlarm(next, pendingIntent)
+
         }
     }
 
@@ -572,15 +570,21 @@ class ScheduleNotificationCoordinator(
      * 开关无关，只受总通知开关约束。任意时刻只挂最近一个触发点的闹钟，
      * 触发后由 handleReminder 发通知并 refresh 推进到下一个。
      */
-    private fun scheduleNextReminder(events: List<ScheduleEvent>, nowMillis: Long) {
-        val next = NotificationSchedule.nextReminderAfter(events, nowMillis, zone)
-        alarmManager.cancel(reminderPendingIntent())
-        if (next != null) {
-            alarmManager.setAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                next.triggerMillis,
-                reminderPendingIntent(next.event.id, next.kind),
-            )
+    private fun scheduleNextReminder(next: ReminderBatch?) {
+        val pending = reminderPendingIntent()
+        alarmManager.cancel(pending)
+        if (next != null) scheduleAlarm(next.triggerMillis, pending)
+    }
+
+    private fun scheduleAlarm(time: Long, pending: PendingIntent) {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, pending)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, pending)
+            }
+        } catch (_: SecurityException) {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, time, pending)
         }
     }
 
@@ -606,6 +610,7 @@ class ScheduleNotificationCoordinator(
         COMPLETE_REQUEST_CODE_BASE + eventId.toInt(),
         Intent(appContext, ScheduleAlarmReceiver::class.java)
             .setAction(ACTION_COMPLETE)
+            .setData(Uri.parse("schedule://complete/$eventId"))
             .putExtra(EXTRA_EVENT_ID, eventId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
@@ -621,6 +626,7 @@ class ScheduleNotificationCoordinator(
             eventId.toInt() * ReminderKind.entries.size + kind.ordinal
 
     companion object {
+        private const val REMINDER_TAG = "schedule-reminder:"
         const val ACTION_REFRESH = "com.lamuier.scheduletimeline.action.REFRESH_NOTIFICATIONS"
         const val ACTION_REMINDER = "com.lamuier.scheduletimeline.action.SCHEDULE_REMINDER"
         const val ACTION_COMPLETE = "com.lamuier.scheduletimeline.action.COMPLETE_TOKUTEN"

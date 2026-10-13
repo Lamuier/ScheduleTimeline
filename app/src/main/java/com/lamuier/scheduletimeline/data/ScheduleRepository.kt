@@ -48,7 +48,11 @@ class ScheduleRepository(
 
     suspend fun save(event: ScheduleEvent): Long {
         return database.withTransaction {
-            val normalized = normalizeEvent(event)
+            val current = if (event.id == 0L) null else checkNotNull(eventDao.getById(event.id))
+            val normalized = normalizeEvent(event).let {
+                if (current == null) it else it.copy(completed =
+                    it.eventType == EventType.TOKUTEN.storage && current.completed)
+            }
             saveTeamCategories(listOf(normalized))
             val id = if (normalized.id == 0L) {
                 eventDao.upsert(normalized)
@@ -95,11 +99,7 @@ class ScheduleRepository(
 
     /** 仅特典可标记完成；完成后通知不再提醒该日程。 */
     suspend fun setTokutenCompleted(id: Long, completed: Boolean): Boolean {
-        val event = eventDao.getById(id) ?: return false
-        if (EventType.fromStorage(event.eventType) != EventType.TOKUTEN) return false
-        if (event.completed == completed) return true
-        eventDao.update(event.copy(completed = completed))
-        return true
+        return eventDao.setTokutenCompleted(id, completed) > 0
     }
 
     suspend fun clearAll() {
@@ -175,10 +175,11 @@ class ScheduleRepository(
         }
     }
 
-    private fun normalizeEvent(event: ScheduleEvent): ScheduleEvent = event.copy(
-        team = TeamNames.encode(event.teamNames),
-        linkedPerformanceId = null,
-    )
+    private fun normalizeEvent(event: ScheduleEvent): ScheduleEvent {
+        require(event.hasValidTime) { "Invalid event time" }
+        require(ScheduleExport.parseDayKey(event.dayKey) != null) { "Invalid event date" }
+        return event.copy(team = TeamNames.encode(event.teamNames), linkedPerformanceId = null)
+    }
 
     private suspend fun saveTeamCategories(events: List<ScheduleEvent>) {
         val categories = events

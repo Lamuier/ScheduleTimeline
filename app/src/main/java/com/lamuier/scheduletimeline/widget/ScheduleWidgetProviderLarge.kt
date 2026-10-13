@@ -9,6 +9,12 @@ import kotlinx.coroutines.launch
 
 /** 4×3 列表小组件：展示当日全部日程。 */
 class ScheduleWidgetProviderLarge : AppWidgetProvider() {
+    override fun onEnabled(context: Context) {
+        (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication).refreshNotifications()
+    }
+    override fun onDisabled(context: Context) {
+        (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication).refreshNotifications()
+    }
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,
@@ -16,7 +22,10 @@ class ScheduleWidgetProviderLarge : AppWidgetProvider() {
     ) {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
-            runCatching { ScheduleWidgetUpdater.refreshAll(context) }
+            runCatching {
+                (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication).notificationCoordinator.refresh()
+                ScheduleWidgetUpdater.refreshAll(context)
+            }
             pending.finish()
         }
     }

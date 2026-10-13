@@ -50,6 +50,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -66,6 +67,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -111,22 +114,31 @@ fun ManageDataSheet(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var currentStep by remember { mutableStateOf(if (openAtImport) ManageStep.Import else ManageStep.Menu) }
+    val exportEmptyMessage = stringResource(R.string.export_empty)
+    val exportShareTitle = stringResource(R.string.export_share_title)
+    var currentStep by rememberSaveable { mutableStateOf(if (openAtImport) ManageStep.Import else ManageStep.Menu) }
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val writeState by viewModel.writeState.collectAsStateWithLifecycle()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
     val liveUpdatesAlwaysOn by viewModel.liveUpdatesAlwaysOn.collectAsStateWithLifecycle()
 
+    val busyNow by rememberUpdatedState(writeState.busy)
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!writeState.busy) onDismiss() },
+        sheetGesturesEnabled = false,
         sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = true,
+            confirmValueChange = { it != androidx.compose.material3.SheetValue.Hidden || !busyNow },
             // 禁止下拉关闭：拖拽手势与导入页页内滚动（识别结果 / 输入框）冲突，
             // 关闭只保留点击遮罩与系统返回
-            confirmValueChange = { it != SheetValue.Hidden },
+
         ),
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
     ) {
+        if (writeState.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (writeState.failed) Text(stringResource(R.string.operation_failed),
+            color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
         AnimatedContent(
             targetState = currentStep,
             transitionSpec = {
@@ -168,7 +180,7 @@ fun ManageDataSheet(
                             if (csv.isBlank()) {
                                 Toast.makeText(
                                     context,
-                                    context.getString(R.string.export_empty),
+                                    exportEmptyMessage,
                                     Toast.LENGTH_SHORT,
                                 ).show()
                             } else {
@@ -179,7 +191,7 @@ fun ManageDataSheet(
                                 context.startActivity(
                                     Intent.createChooser(
                                         intent,
-                                        context.getString(R.string.export_share_title),
+                                        exportShareTitle,
                                     ),
                                 )
                                 onDismiss()
@@ -196,10 +208,10 @@ fun ManageDataSheet(
                     }
                     ImportView(
                         fallbackDayKey = fallbackDayKey,
-                        onBack = { currentStep = ManageStep.Menu },
+                        busy = writeState.busy,
+                        onBack = { if (!writeState.busy) currentStep = ManageStep.Menu },
                         onImport = { csv ->
-                            viewModel.batchImport(csv)
-                            onDismiss()
+                            viewModel.batchImport(csv, onDone = onDismiss)
                         },
                     )
                 }
@@ -209,8 +221,7 @@ fun ManageDataSheet(
                     confirmText = stringResource(R.string.clear_all_confirm),
                     onBack = { currentStep = ManageStep.Menu },
                     onConfirm = {
-                        viewModel.clearAllData()
-                        onDismiss()
+                        viewModel.clearAllData(onDone = onDismiss)
                     },
                 )
                 ManageStep.ClearDayConfirm -> {
@@ -231,8 +242,7 @@ fun ManageDataSheet(
                         confirmText = stringResource(R.string.clear_day_confirm),
                         onBack = { currentStep = ManageStep.Menu },
                         onConfirm = {
-                            viewModel.clearDayData(currentDate)
-                            onDismiss()
+                            viewModel.clearDayData(currentDate, onDone = onDismiss)
                         },
                     )
                 }
@@ -570,13 +580,15 @@ private fun ActionRow(
 @Composable
 private fun ImportView(
     fallbackDayKey: String,
+    busy: Boolean = false,
     onBack: () -> Unit,
     onImport: (String) -> Unit,
 ) {
-    var text by remember { mutableStateOf("") }
-    val previewEvents = remember(text, fallbackDayKey) {
-        ScheduleExport.parseImport(text, fallbackDayKey = fallbackDayKey)
+    var text by rememberSaveable { mutableStateOf("") }
+    val parseResult = remember(text, fallbackDayKey) {
+        ScheduleExport.parseImportResult(text, fallbackDayKey)
     }
+    val previewEvents = parseResult.drafts.map { it.event }
     var selectedIndexes by remember(previewEvents) {
         mutableStateOf(previewEvents.indices.toSet())
     }
@@ -591,6 +603,20 @@ private fun ImportView(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp),
     ) {
+        parseResult.issues.forEach { issue ->
+            val reason = when (issue.error) {
+                com.lamuier.scheduletimeline.data.ImportError.Fields -> R.string.import_error_fields
+                com.lamuier.scheduletimeline.data.ImportError.Date -> R.string.import_error_date
+                com.lamuier.scheduletimeline.data.ImportError.Team -> R.string.import_error_team
+                com.lamuier.scheduletimeline.data.ImportError.Time -> R.string.import_error_time
+                com.lamuier.scheduletimeline.data.ImportError.EndBeforeStart -> R.string.import_error_interval
+                com.lamuier.scheduletimeline.data.ImportError.Type -> R.string.import_error_type
+                com.lamuier.scheduletimeline.data.ImportError.Quoting -> R.string.import_error_quoting
+            }
+            Text(stringResource(R.string.import_error_row, issue.line, stringResource(reason)),
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+
         SheetHeader(
             title = stringResource(R.string.cd_batch_import),
             subtitle = stringResource(R.string.import_hint),
@@ -660,7 +686,7 @@ private fun ImportView(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            enabled = selectedEvents.isNotEmpty(),
+            enabled = selectedEvents.isNotEmpty() && !busy,
             shape = RoundedCornerShape(16.dp),
         ) {
             Text(

@@ -39,3 +39,7 @@ data class ScheduleEvent(
      */
     val completed: Boolean = false,
 )
+
+/** Only same-day, positive-duration windows participate in layout and reminders. */
+val ScheduleEvent.hasValidTime: Boolean
+    get() = startMinutes in 0..1439 && endMinutes in 0..1439 && endMinutes > startMinutes

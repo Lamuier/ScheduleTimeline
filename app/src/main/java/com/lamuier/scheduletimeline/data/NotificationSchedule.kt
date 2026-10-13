@@ -25,10 +25,10 @@ object NotificationSchedule {
         zone: ZoneId,
     ): List<ScheduledEventWindow> = events.mapNotNull { event ->
         // 已完成的特典不再进入常驻通知、进度刷新与关键时间点提醒。
-        if (event.completed) return@mapNotNull null
+        if (event.completed || !event.hasValidTime) return@mapNotNull null
         val date = runCatching { LocalDate.parse(event.dayKey) }.getOrNull() ?: return@mapNotNull null
-        val start = date.atStartOfDay(zone).toInstant().toEpochMilli() + event.startMinutes * 60_000L
-        val end = date.atStartOfDay(zone).toInstant().toEpochMilli() + event.endMinutes * 60_000L
+        val start = date.atTime(event.startMinutes / 60, event.startMinutes % 60).atZone(zone).toInstant().toEpochMilli()
+        val end = date.atTime(event.endMinutes / 60, event.endMinutes % 60).atZone(zone).toInstant().toEpochMilli()
         if (end <= start) null else ScheduledEventWindow(event, start, end)
     }
 
@@ -46,7 +46,7 @@ object NotificationSchedule {
         zone: ZoneId,
     ): Long? = windows(events, zone)
         .flatMap { listOf(it.startMillis, it.endMillis) }
-        .filter { it > nowMillis + 1_000L }
+        .filter { it > nowMillis }
         .minOrNull()
 
     fun nextWindowAfter(
@@ -120,6 +120,6 @@ object NotificationSchedule {
         zone: ZoneId,
     ): ScheduledReminder? = windows(events, zone)
         .flatMap { remindersFor(it, zone) }
-        .filter { it.triggerMillis > nowMillis + 1_000L }
+        .filter { it.triggerMillis > nowMillis }
         .minByOrNull { it.triggerMillis }
 }
