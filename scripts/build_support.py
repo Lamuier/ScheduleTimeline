@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
 SIGNING_KEYS = (
@@ -62,6 +63,11 @@ def app_config(root):
     name = re.search(r'rootProject\.name\s*=\s*"([^"]+)"', settings)
     require(name and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name.group(1)), "rootProject.name 须为安全的项目名")
     result["projectName"] = name.group(1)
+    app_name = ET.parse(root / "app/src/main/res/values/strings.xml").find("string[@name='app_name']")
+    require(app_name is not None and app_name.text, "无法读取 Release app_name")
+    result["appName"] = app_name.text
+    require(not re.search(r'[\\/:*?"<>|\x00-\x1f]', result["appName"])
+            and not result["appName"].endswith((" ", ".")), "app_name 不适合用作 APK 文件名")
     policy = read_json(root / "build-policy.json")
     require(isinstance(policy, dict) and policy.get("schemaVersion") == 1, "build-policy.json 格式无效")
     for key in ("allowedAbis", "allowedPermissions", "forbiddenDexStrings"):
@@ -370,8 +376,14 @@ def verify_apk(root, apk, tools, env, config, release, certificate):
     return verify_archive(apk, release, config["policy"])
 
 
-def artifact_base(config):
-    return config["projectName"] + "-v" + config["versionName"] + "-release"
+def artifact_base(config, started_at=None, official_release=False):
+    base = config["appName"] + "-" + config["versionName"]
+    if official_release:
+        return base
+    # 北京时间固定 UTC+8，Windows 无 tzdata 时也无需下载额外依赖。
+    started_at = started_at or datetime.now(timezone.utc)
+    stamp = started_at.astimezone(timezone(timedelta(hours=8), "Asia/Shanghai"))
+    return base + "_" + stamp.strftime("%Y%m%d_%H%M%S")
 
 
 def export_release(root, apk, config, certificate, base, elf, checks, offline,
@@ -380,6 +392,10 @@ def export_release(root, apk, config, certificate, base, elf, checks, offline,
     require(mapping.is_file() and mapping.stat().st_size > 0, "缺少 R8 mapping.txt，无法完成 Release 导出")
     dist = root / "dist"
     dist.mkdir(exist_ok=True)
+    if not official_release:
+        require(not any((dist / (base + suffix)).exists() for suffix in
+                        (".apk", ".sha256", "-mapping.txt", "-build.json")),
+                "未归档构建同名产物已存在，请重新构建以使用新的开始时间戳")
     sha = hashlib.sha256(apk.read_bytes()).hexdigest().upper()
     destination = dist / (base + ".apk")
     report = {
@@ -399,9 +415,9 @@ def export_release(root, apk, config, certificate, base, elf, checks, offline,
     with tempfile.TemporaryDirectory(prefix=".build-", dir=dist) as staging:
         stage = Path(staging)
         shutil.copy2(apk, stage / destination.name)
-        shutil.copy2(mapping, stage / (base.removesuffix("-release") + "-mapping.txt"))
-        (stage / (base + ".sha256")).write_text(sha + "  " + destination.name + "\n", encoding="ascii")
-        (stage / (base.removesuffix("-release") + "-build.json")).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        shutil.copy2(mapping, stage / (base + "-mapping.txt"))
+        (stage / (base + ".sha256")).write_text(sha + "  " + destination.name + "\n", encoding="utf-8")
+        (stage / (base + "-build.json")).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         publish_staged(stage, dist)
     print("Release 校验通过，导出：" + str(destination), flush=True)
     print("SHA-256：" + sha)
@@ -436,6 +452,7 @@ def parser():
     mode.add_argument("--debug", action="store_true", help="Debug 构建（默认）")
     mode.add_argument("--release", action="store_true", help="签名 Release 构建、校验与导出")
     mode.add_argument("--setup-signing", action="store_true", help="显式绑定已有原密钥与证书指纹；不生成或重绑密钥")
+    result.add_argument("--official-release", action="store_true", help="仅配合 --release：正式发布文件名不带时间戳")
     network = result.add_mutually_exclusive_group()
     network.add_argument("--offline", action="store_true", help="离线依赖解析")
     network.add_argument("--online", action="store_true", help="允许下载依赖（默认离线；需显式启用）")
@@ -459,6 +476,7 @@ def main(argv=None, root=ROOT):
     require(sys.version_info >= (3, 9), "需要 Python 3.9+")
     host = platform.system()
     require(host in ("Darwin", "Linux", "Windows"), "仅支持 Windows / Linux / macOS")
+    require(not args.official_release or args.release, "--official-release 必须配合 --release")
     require(not args.install or not (args.release or args.setup_signing or args.doctor), "--install 仅用于 Debug 构建")
     require(args.setup_signing or not any((args.adopt_keystore, args.key_alias, args.credential_file,
                                            args.key_credential_file, args.certificate_sha256)), "签名配置参数仅用于 --setup-signing")
@@ -478,7 +496,7 @@ def main(argv=None, root=ROOT):
                 env.pop(key, None)
     config = app_config(root)
     started_at = datetime.now(timezone.utc)
-    base = artifact_base(config) if args.release else None
+    base = artifact_base(config, started_at, args.official_release) if args.release else None
     sdk = find_sdk(root, args.sdk, env, host)
     env.update(JAVA_HOME=str(java_home), ANDROID_HOME=str(sdk), ANDROID_SDK_ROOT=str(sdk))
     env["PATH"] = str(java_home / "bin") + os.pathsep + env.get("PATH", "")
@@ -516,7 +534,7 @@ def main(argv=None, root=ROOT):
         elf = verify_apk(root, apk, tools, env, config, args.release, certificate)
         if args.release:
             export_release(root, apk, config, certificate, base, elf, not args.skip_checks, offline,
-                           started_at, False)
+                           started_at, args.official_release)
         else:
             print("Debug 构建与 APK 校验通过：" + str(apk), flush=True)
         if args.install:

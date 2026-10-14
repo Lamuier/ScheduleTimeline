@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.geometry.Offset
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import kotlinx.coroutines.runBlocking
 import org.junit.*
@@ -52,6 +53,119 @@ class SystemEntryComposeTest {
         compose.onNodeWithContentDescription("添加日程").performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(far.toString(), vm().editUiState.value.dayKey) }
+    }
+
+    @Test fun heldDragMovesWithFingerAndUpdatesDateBeforeRelease() {
+        val today = LocalDate.now()
+        runBlocking { (activity.application as ScheduleApplication).repository.saveAll(listOf(
+            ScheduleEvent(team = "Drag today", dayKey = today.toString(), startMinutes = 600, endMinutes = 660),
+            ScheduleEvent(team = "Drag tomorrow", dayKey = today.plusDays(1).toString(), startMinutes = 600, endMinutes = 660),
+        )) }
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("Drag today", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        val pager = compose.onNodeWithTag("date-pager")
+        val page = compose.onNodeWithTag("day-page-$today")
+        val startRight = page.fetchSemanticsNode().boundsInRoot.right
+        pager.performTouchInput { down(center); moveBy(Offset(-80f, 0f), 32) }
+        compose.mainClock.advanceTimeBy(32)
+        val firstRight = page.fetchSemanticsNode().boundsInRoot.right
+        assertTrue("The page must move before the finger is released", startRight - firstRight > 50f)
+        pager.performTouchInput { moveBy(Offset(-80f, 0f), 32) }
+        compose.mainClock.advanceTimeBy(32)
+        val secondRight = page.fetchSemanticsNode().boundsInRoot.right
+        assertEquals("Further movement follows the finger", 80f, firstRight - secondRight, 3f)
+        pager.performTouchInput { moveBy(Offset(-70f, 0f), 32) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText(dateText(today.plusDays(1))).assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回今天").assertIsDisplayed()
+        pager.performTouchInput { up() }
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(today.plusDays(1), vm().currentDate.value) }
+    }
+
+    @Test fun nearestAndTodayJumpsFinishOnNextFramesWithoutPageAnimation() {
+        val today = LocalDate.now()
+        val future = today.plusDays(2)
+        runBlocking { (activity.application as ScheduleApplication).repository.save(ScheduleEvent(
+            team = "Future", dayKey = future.toString(), startMinutes = 600, endMinutes = 660)) }
+        val hint = activity.getString(R.string.empty_nearest_future, 2)
+        compose.waitUntil(5000) { compose.onAllNodesWithText(hint).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText(hint).performClick()
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText(dateText(future)).assertIsDisplayed()
+        val viewport = compose.onNodeWithTag("date-pager").fetchSemanticsNode().boundsInRoot
+        assertEquals(viewport, compose.onNodeWithTag("day-page-$future").fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithContentDescription("返回今天").performClick()
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText(dateText(today)).assertIsDisplayed()
+        assertEquals(viewport, compose.onNodeWithTag("day-page-$today").fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithContentDescription("返回今天").assertDoesNotExist()
+        compose.mainClock.autoAdvance = true
+    }
+
+    @Test fun returnTodayCancelsAnUnfinishedArrowAnimation() {
+        val today = LocalDate.now()
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithContentDescription("后一天").performClick()
+        compose.mainClock.advanceTimeBy(128)
+        compose.onNodeWithContentDescription("返回今天").performClick()
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText(dateText(today)).assertIsDisplayed()
+        val viewport = compose.onNodeWithTag("date-pager").fetchSemanticsNode().boundsInRoot
+        assertEquals(viewport, compose.onNodeWithTag("day-page-$today").fetchSemanticsNode().boundsInRoot)
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(today, vm().currentDate.value) }
+    }
+
+    @Test fun shortDragSnapsBackAndReturnTodayInterruptsAFling() {
+        val today = LocalDate.now()
+        val pager = compose.onNodeWithTag("date-pager")
+        pager.performTouchInput {
+            down(center)
+            moveBy(Offset(-60f, 0f), 200)
+            advanceEventTime(200)
+            up()
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText(dateText(today)).assertIsDisplayed()
+        compose.runOnIdle { assertEquals(today, vm().currentDate.value) }
+        compose.mainClock.autoAdvance = false
+        pager.performTouchInput { swipeLeft(durationMillis = 100) }
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithContentDescription("返回今天").performClick()
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithText(dateText(today)).assertIsDisplayed()
+        assertEquals(pager.fetchSemanticsNode().boundsInRoot,
+            compose.onNodeWithTag("day-page-$today").fetchSemanticsNode().boundsInRoot)
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(today, vm().currentDate.value) }
+    }
+
+    @Test fun nearestHintRefreshesWhenSchedulesChangeOnTheSameEmptyDate() {
+        val today = LocalDate.now()
+        val repository = (activity.application as ScheduleApplication).repository
+        val id = runBlocking { repository.save(ScheduleEvent(
+            team = "First", dayKey = today.plusDays(2).toString(), startMinutes = 600, endMinutes = 660)) }
+        val firstHint = activity.getString(R.string.empty_nearest_future, 2)
+        compose.waitUntil(5000) { compose.onAllNodesWithText(firstHint).fetchSemanticsNodes().isNotEmpty() }
+        runBlocking {
+            repository.delete(id)
+            repository.save(ScheduleEvent(team = "Replacement", dayKey = today.plusDays(4).toString(),
+                startMinutes = 600, endMinutes = 660))
+        }
+        val newHint = activity.getString(R.string.empty_nearest_future, 4)
+        compose.waitUntil(5000) { compose.onAllNodesWithText(newHint).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(firstHint).assertDoesNotExist()
+        compose.onNodeWithText(newHint).assertIsDisplayed()
     }
 
     @Test fun todayNextAndImportShortcutsNavigateOutOfEditor() {

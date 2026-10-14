@@ -1,13 +1,8 @@
 package com.lamuier.scheduletimeline.ui.timeline
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
@@ -75,23 +70,14 @@ internal fun TimelineTopBar(
                         contentDescription = stringResource(R.string.cd_prev_day),
                     )
                 }
-                AnimatedContent(
-                    targetState = currentDate,
-                    transitionSpec = {
-                        val forward = targetState.isAfter(initialState)
-                        val enter = slideInHorizontally { width -> if (forward) width else -width } + fadeIn()
-                        val exit = slideOutHorizontally { width -> if (forward) -width else width } + fadeOut()
-                        enter togetherWith exit
-                    },
-                    contentKey = { it },
+                Box(
                     modifier = Modifier
                         .weight(1f)
                         .clickable(onClick = onSelectDate),
                     contentAlignment = Alignment.Center,
-                    label = "timeline-date",
-                ) { date ->
+                ) {
                     Text(
-                        text = date.format(
+                        text = currentDate.format(
                             DateTimeFormatter.ofPattern(stringResource(R.string.date_pattern)),
                         ),
                         style = MaterialTheme.typography.titleMedium,

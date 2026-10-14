@@ -16,7 +16,7 @@ Windows 使用 `build.ps1`，macOS / Linux 使用 `build.sh`；两者交给标�
 
 启动时会打印「生效参数」（模式、Clean / SkipChecks / Gradle 离线是否生效等）；Gradle 实际命令行也会写出。
 
-Debug 与 Release 均默认离线，可用 `-Online` / `--online` 下载缺失依赖。macOS / Linux 运行 `bash build.sh`（Debug）、`bash build.sh --release`（正式包）、`bash build.sh --release --online` 或 `bash build.sh --release --doctor`（只预检、不下载）。
+Debug 与 Release 均默认离线，可用 `-Online` / `--online` 下载缺失依赖。macOS / Linux 运行 `bash build.sh`（Debug）、`bash build.sh --release`（未归档签名包）、`bash build.sh --release --online` 或 `bash build.sh --release --doctor`（只预检、不下载）。正式发版显式加 `--official-release`；Windows 使用 `-Release -OfficialRelease`。
 
 可用 `-JavaHome` / `--java-home` 指定维护中的 JDK。本机早期 OpenJDK 17 GA 在 Lint 的 C2 编译阶段复现过 JVM 崩溃，验收改用官方 SHA-256 验证过的 Temurin 17 修订版；这不改变应用 JVM 目标 17。
 
@@ -25,9 +25,12 @@ Debug 与 Release 均默认离线，可用 `-Online` / `--online` 下载缺失�
 | 产物 | 路径 | applicationId |
 | --- | --- | --- |
 | Debug | `app\build\outputs\apk\debug\app-debug.apk` | `com.lamuier.scheduletimeline.debug` |
-| Release | `dist\ScheduleTimeline-vX.Y.Z-release.apk` | `com.lamuier.scheduletimeline` |
+| 未归档 Release | `dist\追程-X.Y.Z_yyyyMMdd_HHmmss.apk` | `com.lamuier.scheduletimeline` |
+| 正式发布 Release | `dist\追程-X.Y.Z.apk` | `com.lamuier.scheduletimeline` |
 
 真机调试必须安装 Debug 包（`.debug` 后缀），与本机正式版并存；禁止对正式包名 `adb uninstall` 再装 Debug，以免清空用户数据。
+
+APK 文件名取 Release `app_name` 和 `versionName`。未归档包使用本次构建开始的北京时间（Asia/Shanghai），不覆盖已有同时间戳产物；正式发布包不带 `v`、`-release` 或时间戳。SHA-256、mapping 与构建报告使用对应 APK 去掉 `.apk` 后的完整前缀，同批产物共用时间戳。
 
 ### Release 签名
 

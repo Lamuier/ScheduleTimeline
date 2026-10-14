@@ -105,4 +105,26 @@ class ScheduleViewModelTest {
         assertTrue(vm.writeState.value.failed); assertFalse(exited)
         assertEquals(0, database.scheduleEventDao().count())
     }
+
+    @Test fun cachedDayAndSelectedDaySharePreparedTimelineAndKeepInvalidRecords() = runBlocking {
+        val id = repository.save(event)
+        val invalid = event.copy(id = 0, startMinutes = 660, endMinutes = 660)
+        val invalidId = database.scheduleEventDao().upsert(invalid)
+        val vm = model()
+        val date = java.time.LocalDate.parse(event.dayKey)
+        val page = vm.observeDayState(date)
+        assertSame(page, vm.observeDayState(date))
+        val prepared = withTimeout(5000) { page.first { it.events.size == 2 } }
+        assertEquals(listOf(id), prepared.items.filterIsInstance<TimelineItem.Event>().map { it.event.id })
+        assertEquals(1, prepared.stats?.eventCount)
+        assertEquals(listOf(invalidId), prepared.invalidEvents.map { it.id })
+        vm.changeDate(date)
+        val selected = withTimeout(5000) { vm.dayState.first { it.date == date && it.events.size == 2 } }
+        assertSame(prepared, selected)
+        repository.delete(id)
+        val changed = withTimeout(5000) { page.first { it.events.size == 1 } }
+        assertTrue(changed.items.isEmpty())
+        assertNull(changed.stats)
+        assertEquals(listOf(invalidId), changed.invalidEvents.map { it.id })
+    }
 }

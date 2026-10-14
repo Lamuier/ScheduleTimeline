@@ -21,11 +21,15 @@ import com.lamuier.scheduletimeline.data.TimelineItem
 import com.lamuier.scheduletimeline.data.TokutenKind
 import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.Category
+import com.lamuier.scheduletimeline.data.ChartLayout
+import com.lamuier.scheduletimeline.data.DayStats
+import com.lamuier.scheduletimeline.data.hasValidTime
 import com.lamuier.scheduletimeline.data.teamNames
 import com.lamuier.scheduletimeline.ui.edit.EditUiState
 import com.lamuier.scheduletimeline.ui.edit.EditValidationError
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,15 +38,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 data class ScheduleDayState(
     val date: LocalDate,
     val events: List<ScheduleEvent>,
+    val items: List<TimelineItem> = emptyList(),
+    val stats: DayStats? = null,
+    val invalidEvents: List<ScheduleEvent> = emptyList(),
 )
 
 /** 分页日期流缓存上限：覆盖视口相邻页与近期回访即可，避免无限累积订阅。 */
@@ -66,14 +75,11 @@ class ScheduleViewModel(
         (application as ScheduleApplication).notificationPreferences.alwaysOn
 
     val dayState: StateFlow<ScheduleDayState> = _currentDate
-        .flatMapLatest { date ->
-            repository.observeDay(date.format(DateTimeFormatter.ISO_LOCAL_DATE))
-                .map { events -> ScheduleDayState(date, events) }
-        }
+        .flatMapLatest { date -> observeDayState(date) }
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
-            ScheduleDayState(LocalDate.now(), emptyList()),
+            ScheduleDayState(_currentDate.value, emptyList()),
         )
 
     val events: StateFlow<List<ScheduleEvent>> = dayState
@@ -81,7 +87,11 @@ class ScheduleViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val timelineItems: StateFlow<List<TimelineItem>> = dayState
-        .map { TimelineBuilder.build(it.events) }
+        .map { it.items }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 空日提示共享日期索引，切页时无需等待一次新的数据库查询。 */
+    val scheduledDayKeys: StateFlow<List<String>> = repository.observeDayKeys()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** 团队候选（复用 categories 表）。 */
@@ -153,7 +163,14 @@ class ScheduleViewModel(
     fun observeDayState(date: LocalDate): StateFlow<ScheduleDayState> =
         dayFlows.getOrPut(date) {
             repository.observeDay(date.format(DateTimeFormatter.ISO_LOCAL_DATE))
-                .map { events -> ScheduleDayState(date, events) }
+                .mapLatest { events ->
+                    // 相邻页预加载时也会构建重叠组；纯计算不占用拖动所在的主线程。
+                    withContext(Dispatchers.Default) {
+                        val (valid, invalid) = events.partition { it.hasValidTime }
+                        ScheduleDayState(date, events, TimelineBuilder.build(valid),
+                            ChartLayout.stats(valid), invalid)
+                    }
+                }
                 .stateIn(
                     viewModelScope,
                     SharingStarted.WhileSubscribed(5_000),

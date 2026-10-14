@@ -1,7 +1,7 @@
 # Windows PowerShell 5.1 / PowerShell 7 frontend; shared flow: scripts/build_support.py.
 param(
     [Alias('h')][switch]$Help,
-    [switch]$Install, [switch]$Release, [switch]$SetupSigning,
+    [switch]$Install, [switch]$Release, [switch]$OfficialRelease, [switch]$SetupSigning,
     [switch]$Clean, [switch]$Offline, [switch]$Online, [switch]$SkipChecks,
     [switch]$Doctor, [string]$JavaHome, [string]$Sdk,
     [string]$SigningRoot, [string]$AdoptKeystore, [string]$KeyAlias,
@@ -18,6 +18,7 @@ if ($AdoptDebugKeystore -or $GenerateNewKey -or $ForceRebind -or $PSBoundParamet
 $pythonArgs = @()
 foreach ($item in @(
     @('Help', '--help'), @('Install', '--install'), @('Release', '--release'),
+    @('OfficialRelease', '--official-release'),
     @('SetupSigning', '--setup-signing'), @('Doctor', '--doctor'), @('Clean', '--clean'),
     @('Offline', '--offline'), @('Online', '--online'), @('SkipChecks', '--skip-checks')
 )) {

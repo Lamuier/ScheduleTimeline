@@ -132,6 +132,11 @@ class ScheduleRepository(
 
     suspend fun distinctDayKeys(): List<String> = eventDao.distinctDayKeys()
 
+    fun observeDayKeys(): Flow<List<String>> = flow {
+        ensureScheduleReady()
+        emitAll(eventDao.observeDayKeys())
+    }
+
     /** 从指定日期（含当日）起第一个有日程的 dayKey；无则 null。 */
     suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String? =
         eventDao.firstDayKeyOnOrAfter(fromDayKey)

@@ -73,6 +73,9 @@ interface ScheduleEventDao {
     @Query("SELECT DISTINCT dayKey FROM schedule_events ORDER BY dayKey ASC")
     suspend fun distinctDayKeys(): List<String>
 
+    @Query("SELECT DISTINCT dayKey FROM schedule_events ORDER BY dayKey ASC")
+    fun observeDayKeys(): Flow<List<String>>
+
     @Query("SELECT MIN(dayKey) FROM schedule_events WHERE dayKey >= :fromDayKey")
     suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String?
 

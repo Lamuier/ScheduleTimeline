@@ -2,8 +2,8 @@ package com.lamuier.scheduletimeline.ui.timeline
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.animation.core.tween
 import com.lamuier.scheduletimeline.data.ScheduleTimeSnapshot
-import com.lamuier.scheduletimeline.data.hasValidTime
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -19,23 +19,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.ScheduleViewModel
-import com.lamuier.scheduletimeline.data.ChartLayout
+import com.lamuier.scheduletimeline.ScheduleDayState
 import com.lamuier.scheduletimeline.data.DayStats
 import com.lamuier.scheduletimeline.data.NearestScheduleHint
-import com.lamuier.scheduletimeline.data.ScheduleEvent
+import com.lamuier.scheduletimeline.data.ScheduleExport
 import com.lamuier.scheduletimeline.data.TimeFormat
-import com.lamuier.scheduletimeline.data.TimelineBuilder
 import com.lamuier.scheduletimeline.data.TimelineItem
 import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.teamDisplay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,15 +69,7 @@ fun TimelineScreen(
         }
     }
     val time by rememberScheduleTime(clock)
-    val isToday = currentDate == time.today
-    var nearestHint by remember { mutableStateOf<NearestScheduleHint?>(null) }
-    LaunchedEffect(dayState.date, dayState.events.isEmpty()) {
-        nearestHint = if (dayState.events.isEmpty()) {
-            viewModel.findNearestScheduleHint()
-        } else {
-            null
-        }
-    }
+    val scheduledDayKeys by viewModel.scheduledDayKeys.collectAsStateWithLifecycle()
 
     // 无限分页：页码围绕中心页展开，每页对应 baseDate 的前后偏移一天。
     // HorizontalPager 自带跟手拖拽与松手吸附，替代原先手写平移 +
@@ -87,10 +82,39 @@ fun TimelineScreen(
 
     // Only a real drag may commit a pager date; cancelled animations do not own the date.
     var wasScrolling by remember { mutableStateOf(false) }
+    var requestedDate by remember { mutableStateOf(viewModel.currentDate.value) }
+    val scope = rememberCoroutineScope()
+    var navigationJob by remember { mutableStateOf<Job?>(null) }
+
+    // 按钮直接发起分页操作；返回今天、最近日程及日期选择不等待弹簧吸附。
+    // requestedDate 区分自己的导航与外部 Shortcut，避免日期流反过来重启动画。
+    val navigateToDate: (LocalDate, Boolean) -> Unit = { date, animate ->
+        wasScrolling = false
+        navigationJob?.cancel()
+        requestedDate = date
+        viewModel.changeDate(date)
+        val distance = date.toEpochDay() - baseDate.toEpochDay()
+        if (distance !in -(DAY_PAGE_CENTER - 2L)..(DAY_PAGE_CENTER - 3L)) {
+            baseDate = date
+            pagerState.requestScrollToPage(DAY_PAGE_CENTER)
+        } else {
+            val target = DAY_PAGE_CENTER + distance.toInt()
+            if (animate && abs(target - pagerState.currentPage) <= 3) {
+                navigationJob = scope.launch {
+                    pagerState.animateScrollToPage(target, animationSpec = tween(180))
+                }
+            } else {
+                pagerState.requestScrollToPage(target)
+            }
+        }
+    }
 
     LaunchedEffect(pagerState) {
         pagerState.interactionSource.interactions.collect { interaction ->
-            if (interaction is DragInteraction.Start) wasScrolling = true
+            if (interaction is DragInteraction.Start) {
+                navigationJob?.cancel()
+                wasScrolling = true
+            }
         }
     }
     LaunchedEffect(pagerState) {
@@ -98,35 +122,19 @@ fun TimelineScreen(
             .collect { (scrolling, page) ->
                 if (!scrolling && wasScrolling) {
                     wasScrolling = false
-                    viewModel.changeDate(dateForPage(page))
+                    val date = dateForPage(page)
+                    requestedDate = date
+                    viewModel.changeDate(date)
                 }
             }
     }
     LaunchedEffect(currentDate) {
-            val distance = currentDate.toEpochDay() - baseDate.toEpochDay()
-            if (distance !in -(DAY_PAGE_CENTER - 2L)..(DAY_PAGE_CENTER - 3L)) {
-                baseDate = currentDate
-                pagerState.requestScrollToPage(DAY_PAGE_CENTER)
-            } else {
-                val target = DAY_PAGE_CENTER + distance.toInt()
-                if (target != pagerState.currentPage || pagerState.isScrollInProgress) {
-                    if (abs(target - pagerState.currentPage) <= 3) pagerState.animateScrollToPage(target)
-                    else pagerState.scrollToPage(target)
-                }
-            }
+        if (currentDate != requestedDate) navigateToDate(currentDate, false)
     }
 
-    // 顶栏日期跟随拖动：滚动中显示目标页日期，静止时显示落定页日期。
-    // 避免「页面已滑走、顶栏日期仍停留在旧日期，松手后才跳变」的脱节感。
+    // 按屏幕最接近的页同步日期与返回按钮，不等待松手后的 settledPage。
     val displayedDate by remember(baseDate) {
-        derivedStateOf {
-            val page = if (pagerState.isScrollInProgress) {
-                pagerState.targetPage
-            } else {
-                pagerState.settledPage
-            }
-            dateForPage(page)
-        }
+        derivedStateOf { dateForPage(pagerState.currentPage) }
     }
 
     Scaffold(
@@ -134,8 +142,14 @@ fun TimelineScreen(
         topBar = {
             TimelineTopBar(
                 currentDate = displayedDate,
-                onPreviousDay = { wasScrolling = false; viewModel.shiftDate(-1) },
-                onNextDay = { wasScrolling = false; viewModel.shiftDate(1) },
+                onPreviousDay = {
+                    val from = if (wasScrolling) displayedDate else viewModel.currentDate.value
+                    navigateToDate(from.minusDays(1), true)
+                },
+                onNextDay = {
+                    val from = if (wasScrolling) displayedDate else viewModel.currentDate.value
+                    navigateToDate(from.plusDays(1), true)
+                },
                 onSelectDate = { showDatePicker = true },
                 onManage = { viewModel.changeDate(dateForPage(pagerState.currentPage)); showManageSheet = true },
             )
@@ -156,33 +170,39 @@ fun TimelineScreen(
                 // ViewModel 按日期缓存共享 StateFlow：回访页 initialValue 即上次数据，不再从空态闪变。
                 val pageState by remember(pageDate) { viewModel.observeDayState(pageDate) }
                     .collectAsStateWithLifecycle()
+                val nearestHint = remember(pageDate, scheduledDayKeys, pageState.events.isEmpty()) {
+                    if (pageState.events.isEmpty()) {
+                        ScheduleExport.nearestScheduleHint(pageDate, scheduledDayKeys)
+                    } else null
+                }
                 DayPage(
-                    date = pageState.date,
+                    state = pageState,
                     time = time,
-                    events = pageState.events,
-                    nearestHint = if (pageDate == currentDate) nearestHint else null,
+                    nearestHint = nearestHint,
                     onJumpToNearest = { hint ->
                         runCatching { LocalDate.parse(hint.dayKey) }.getOrNull()?.let {
-                            viewModel.changeDate(it)
+                            navigateToDate(it, false)
                         }
                     },
                     onSelectEvent = { viewModel.clearWriteError(); selectedEvent = it },
                 )
             }
 
-            if (!isToday) {
+            if (displayedDate != time.today) {
+                val backToTodayLabel = stringResource(R.string.action_back_to_today)
                 ExtendedFloatingActionButton(
-                    onClick = { viewModel.changeDate(time.today) },
+                    onClick = { navigateToDate(time.today, false) },
                     icon = {
                         Icon(
                             Icons.Default.DateRange,
                             contentDescription = null,
                         )
                     },
-                    text = { Text(stringResource(R.string.action_back_to_today)) },
+                    text = { Text(backToTodayLabel) },
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(16.dp),
+                        .padding(16.dp)
+                        .semantics { contentDescription = backToTodayLabel },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
@@ -203,7 +223,7 @@ fun TimelineScreen(
 
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = currentDate.atStartOfDay(ZoneOffset.UTC)
+            initialSelectedDateMillis = displayedDate.atStartOfDay(ZoneOffset.UTC)
                 .toInstant().toEpochMilli(),
         )
         DatePickerDialog(
@@ -214,7 +234,7 @@ fun TimelineScreen(
                         val date = Instant.ofEpochMilli(millis)
                             .atZone(ZoneOffset.UTC)
                             .toLocalDate()
-                        viewModel.changeDate(date)
+                        navigateToDate(date, false)
                     }
                     showDatePicker = false
                 }) { Text(stringResource(R.string.action_confirm)) }
@@ -268,22 +288,20 @@ private const val DAY_PAGE_CENTER = DAY_PAGE_COUNT / 2
 
 @Composable
 private fun DayPage(
-    date: LocalDate,
+    state: ScheduleDayState,
     time: ScheduleTimeSnapshot,
-    events: List<ScheduleEvent>,
     nearestHint: NearestScheduleHint?,
     onJumpToNearest: (NearestScheduleHint) -> Unit,
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
-    val pageItems = remember(events) { TimelineBuilder.build(events) }
-    val validEvents = remember(events) { events.filter { it.hasValidTime } }
-    val pageStats = remember(validEvents) { ChartLayout.stats(validEvents) }
-
-    val isToday = date == time.today
+    val pageItems = state.items
+    val pageStats = state.stats
+    val events = state.events
+    val isToday = state.date == time.today
     val nowMinutes = time.minutes
     val effectiveNow = if (isToday) nowMinutes else null
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().testTag("day-page-${state.date}")) {
         if (isToday) {
             CurrentStatusBanner(pageItems, nowMinutes)
         }
@@ -291,7 +309,7 @@ private fun DayPage(
         if (pageStats != null) {
             StatsBar(stats = pageStats)
         }
-        val invalidEvents = remember(events) { events.filterNot { it.hasValidTime } }
+        val invalidEvents = state.invalidEvents
         if (invalidEvents.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
                 invalidEvents.forEach { event ->
