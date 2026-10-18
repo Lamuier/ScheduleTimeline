@@ -32,6 +32,6 @@ foreach ($item in @(
 )) {
     if ($PSBoundParameters.ContainsKey($item[0])) { $pythonArgs += @($item[1], [string]$PSBoundParameters[$item[0]]) }
 }
-$pythonArgs += $RemainingArgs
+if ($RemainingArgs) { $pythonArgs += $RemainingArgs }
 $code = Invoke-TemplatePython -Script (Join-Path $PSScriptRoot 'scripts/build_support.py') -ScriptArgs $pythonArgs
 exit $code

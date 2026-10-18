@@ -46,7 +46,8 @@ object XiaomiHyperIslandCapabilityReader {
         )
     }
 
-    fun isSupported(context: Context): Boolean = inspect(context).isOs3Supported
+    fun isSupported(context: Context): Boolean = isXiaomiDevice() && readIslandFeature() &&
+        readProtocol(context.applicationContext).let { it != 1 && it != 2 }
 
     private fun isXiaomiDevice(): Boolean {
         return Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true) ||

@@ -10,6 +10,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.lamuier.scheduletimeline.data.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Dispatchers
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -30,6 +33,7 @@ class ReminderCoordinatorTest {
     private lateinit var alarms: AlarmManager
     private val zone get() = ZoneId.systemDefault()
     private val clock = MutableClock()
+    private val queries = java.util.Collections.synchronizedList(mutableListOf<String>())
     private fun instant(value: String) = LocalDateTime.parse(value).atZone(zone).toInstant()
     private class MutableClock : Clock() {
         var now: Instant = Instant.EPOCH
@@ -40,7 +44,8 @@ class ReminderCoordinatorTest {
     @Before fun setup() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
-        database = Room.inMemoryDatabaseBuilder(app, ScheduleDatabase::class.java).build()
+        database = Room.inMemoryDatabaseBuilder(app, ScheduleDatabase::class.java)
+            .setQueryCallback({ sql, _ -> queries.add(sql) }, java.util.concurrent.Executor { it.run() }).build()
         repository = ScheduleRepository(database)
         preferences = NotificationPreferences(app).also { it.setEnabled(true) }
         coordinator = ScheduleNotificationCoordinator(app, repository, preferences, clock)
@@ -49,6 +54,27 @@ class ReminderCoordinatorTest {
         clock.now = instant("2026-10-19T23:59:00")
     }
     @After fun close() { database.close() }
+
+    @Test fun disabledWithoutWidgetsDoesNotReadHistory() = runBlocking {
+        preferences.setEnabled(false)
+        queries.clear()
+        coordinator.refresh()
+        assertTrue(queries.none { it.contains("schedule_events", ignoreCase = true) })
+        assertTrue(shadowOf(alarms).scheduledAlarms.isEmpty())
+    }
+
+    @Test fun concurrentCompletionCommandsBothPersistAndRefresh() = runBlocking {
+        clock.now = instant("2026-10-20T10:15:00")
+        val ids = listOf(600, 610).map { start -> repository.save(ScheduleEvent(team = "Team$start",
+            dayKey = "2026-10-20", startMinutes = start, endMinutes = start + 60,
+            eventType = EventType.TOKUTEN.storage, tokutenKind = TokutenKind.PARALLEL.storage)) }
+        ids.map { id -> async(Dispatchers.Default) {
+            coordinator.handleComplete(Intent().putExtra(ScheduleNotificationCoordinator.EXTRA_EVENT_ID, id))
+        } }.awaitAll()
+        assertTrue(ids.all { repository.get(it)!!.completed })
+        assertTrue(manager.activeNotifications.isEmpty())
+        assertTrue(shadowOf(alarms).scheduledAlarms.isEmpty())
+    }
 
     @Test fun sameMomentBroadcastPostsAllEventsOnlyOnceAndDeleteClearsPostedReminder() = runBlocking {
         val first = repository.save(ScheduleEvent(team = "A", dayKey = "2026-10-20", startMinutes = 600, endMinutes = 630))

@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.*
 import org.junit.Assert.*
@@ -22,6 +24,47 @@ class RepositoryRegressionTest {
         repository = ScheduleRepository(database)
     }
     @After fun close() { database.close() }
+
+    @Test fun equalDayRowsAreSuppressedBeforeConsumersPrepareTimeline() = runBlocking {
+        val row = event().copy(id = 1)
+        val changed = row.copy(note = "changed")
+        val realDao = database.scheduleEventDao()
+        val dao = object : ScheduleEventDao by realDao {
+            override fun observeByDay(dayKey: String) = flowOf(listOf(row), listOf(row.copy()), listOf(changed))
+        }
+        val emissions = ScheduleRepository(database, dao).observeDay(row.dayKey).toList()
+        assertEquals(listOf(listOf(row), listOf(changed)), emissions)
+    }
+
+    @Test fun candidateQueryMatchesFullMergeIncludingLegacyDefaultsAndUnknownTypes() = runBlocking {
+        val dao = database.scheduleEventDao()
+        val today = java.time.LocalDate.now().toString()
+        val rows = (1..200).map { id -> event("Team$id").copy(id = id.toLong(),
+            dayKey = if (id < 15) "default" else today,
+            startMinutes = (id % 30) * 20, endMinutes = (id % 30) * 20 + 10,
+            eventType = listOf("PERFORMANCE", "TOKUTEN", "unknown")[id % 3],
+            tokutenKind = listOf("", "PRE", "unknown", "PARALLEL")[id % 4],
+            completed = id % 5 == 0, linkedPerformanceId = if (id % 7 == 0) 1L else null,
+            note = "note$id") } + event("invalid").copy(id = 201, dayKey = today,
+                startMinutes = 20, endMinutes = 10)
+        dao.upsertAll(rows)
+        val normalized = rows.map { if (it.dayKey == "default") it.copy(dayKey = today) else it }
+        val plan = EventMerge.plan(normalized)
+        val updates = plan.updates.associateBy { it.id }
+        val expected = normalized.filterNot { it.id in plan.deleteIds }.map {
+            val updated = updates[it.id] ?: it
+            if (updated.linkedPerformanceId in plan.deleteIds) updated.copy(linkedPerformanceId = null) else updated
+        }.sortedBy { it.id }
+        repository.seedIfEmpty()
+        assertEquals(expected, dao.getAll().sortedBy { it.id })
+        assertTrue(dao.getMergeCandidates().all { candidate ->
+            expected.count { it.dayKey == candidate.dayKey && it.startMinutes == candidate.startMinutes && it.endMinutes == candidate.endMinutes } > 1
+        })
+        // A fresh repository must still repair a restored or externally populated database.
+        dao.upsert(expected.first().copy(id = 0, team = "restored"))
+        ScheduleRepository(database).seedIfEmpty()
+        assertTrue(EventMerge.plan(dao.getAll()).isEmpty)
+    }
 
     @Test fun invalidBatchRollsBackEventsAndTeamCandidates() = runBlocking {
         try {

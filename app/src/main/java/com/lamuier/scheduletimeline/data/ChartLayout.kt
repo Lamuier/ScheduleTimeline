@@ -1,5 +1,7 @@
 package com.lamuier.scheduletimeline.data
 
+import java.util.PriorityQueue
+
 /**
  * 图形化时间轴的布局结果：事件被分配到第 [column] 列（共 [columns] 列），
  * 用于让时间上重叠的事件在水平方向并排显示而不互相遮挡。
@@ -86,18 +88,18 @@ object ChartLayout {
     fun stats(events: List<ScheduleEvent>): DayStats? {
         val valid = events.filter { it.hasValidTime }
         if (valid.isEmpty()) return null
-        val merged = mergedBusyIntervals(valid)
+        val sorted = valid.sortedBy { it.startMinutes }
+        val merged = mergeSortedIntervals(sorted)
         val busy = merged.sumOf { it.second - it.first }
         val first = merged.first().first
         val last = merged.last().second
 
         var conflicts = 0
-        val sorted = valid.sortedBy { it.startMinutes }
-        for (i in sorted.indices) {
-            for (j in i + 1 until sorted.size) {
-                if (sorted[j].startMinutes >= sorted[i].endMinutes) break
-                conflicts++
-            }
+        val activeEnds = PriorityQueue<Int>()
+        for (event in sorted) {
+            while (activeEnds.isNotEmpty() && activeEnds.peek()!! <= event.startMinutes) activeEnds.remove()
+            conflicts += activeEnds.size
+            activeEnds.add(event.endMinutes)
         }
 
         return DayStats(
@@ -114,7 +116,10 @@ object ChartLayout {
     private fun mergedBusyIntervals(events: List<ScheduleEvent>): List<Pair<Int, Int>> {
         val valid = events.filter { it.hasValidTime }
         if (valid.isEmpty()) return emptyList()
-        val sorted = valid.sortedBy { it.startMinutes }
+        return mergeSortedIntervals(valid.sortedBy { it.startMinutes })
+    }
+
+    private fun mergeSortedIntervals(sorted: List<ScheduleEvent>): List<Pair<Int, Int>> {
         val merged = mutableListOf(sorted.first().startMinutes to sorted.first().endMinutes)
         sorted.drop(1).forEach { event ->
             val last = merged.last()

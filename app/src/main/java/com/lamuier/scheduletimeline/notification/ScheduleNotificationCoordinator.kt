@@ -1,6 +1,10 @@
 package com.lamuier.scheduletimeline.notification
 
 import java.time.Clock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import com.lamuier.scheduletimeline.data.NotificationSnapshot
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import com.lamuier.scheduletimeline.data.ReminderPlanner
@@ -53,7 +57,8 @@ class ScheduleNotificationCoordinator(
     private val notificationManager =
         appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-    private val zone get() = ZoneId.systemDefault()
+    private var refreshZone = ZoneId.systemDefault()
+    private val zone get() = refreshZone
     private val mutex = Mutex()
     private val reminderStore = ReminderStore(appContext)
     private val dateFormatter = DateTimeFormatter.ofPattern(
@@ -67,59 +72,87 @@ class ScheduleNotificationCoordinator(
      * 因此这里不用任何 span，直接把类型单字以「类型字·团队名」的纯文本形式写入标题/正文，
      * 既避免跨进程丢失，也天然把「演/特」与团队名用「·」隔开、区分清楚。
      */
-    suspend fun refresh() = mutex.withLock { refreshLocked() }
+    private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val refreshRequests = CoalescingRefresh(refreshScope) { force ->
+        mutex.withLock { refreshLocked(force) }
+    }
+    private var channelConfiguration: String? = null
 
-    private suspend fun refreshLocked() {
-        ensureChannel()
-        ensureReminderChannel()
-        val events = repository.allEvents()
-        val now = clock.millis()
-        if (!preferences.enabled.value || !canPostNotifications()) {
+    suspend fun refresh(forceWidgets: Boolean = false) = refreshRequests.request(forceWidgets)
+
+    private suspend fun refreshLocked(forceWidgets: Boolean = false) {
+        val targets = ScheduleWidgetUpdater.targets(appContext)
+        val notifications = preferences.enabled.value && canPostNotifications()
+        val alwaysOn = preferences.alwaysOn.value
+        // A disabled transition must still clear notifications, durable reminders and alarms.
+        if (!notifications && !targets.any) {
             notificationManager.cancelAll()
             cancelReminderAlarm()
+            cancelBoundaryAlarm()
             reminderStore.write(ReminderState())
-            scheduleNextBoundary(events, now, 60_000L)
+            ScheduleWidgetUpdater.clearCachedViews()
             return
         }
-        val decision = ReminderPlanner.plan(events, now, zone, reminderStore.read())
-        notificationManager.activeNotifications.filter {
-            (it.notification.channelId == REMINDER_CHANNEL_ID && it.tag == null) ||
-                (it.tag?.startsWith(REMINDER_TAG) == true && it.tag.removePrefix(REMINDER_TAG) !in decision.validKeys)
-        }.forEach { notificationManager.cancel(it.tag, it.id) }
-        decision.deliver.forEach { postReminder(it) }
-        reminderStore.write(decision.state)
-        val active = NotificationSchedule.activeAt(events, now, zone)
-        if (active.isEmpty()) {
-            val upcoming = if (preferences.alwaysOn.value) {
-                NotificationSchedule.nextWindowAfter(events, now, zone)
-            } else {
-                null
+        val events = repository.allEvents()
+        val now = clock.millis()
+        refreshZone = ZoneId.systemDefault()
+        val snapshot = NotificationSchedule.snapshot(events, now, zone)
+        try {
+            val configuration = appContext.resources.configuration.toString()
+            if (channelConfiguration != configuration) {
+                ensureChannel()
+                ensureReminderChannel()
+                channelConfiguration = configuration
             }
-            if (upcoming == null) {
-                notificationManager.cancel(LIVE_NOTIFICATION_ID)
+            if (!notifications) {
+                notificationManager.cancelAll()
+                cancelReminderAlarm()
+                reminderStore.write(ReminderState())
+                scheduleNextBoundary(snapshot, notifications, targets.any, 60_000L)
+                return
+            }
+            val decision = ReminderPlanner.plan(snapshot, reminderStore.read())
+            notificationManager.activeNotifications.filter {
+                (it.notification.channelId == REMINDER_CHANNEL_ID && it.tag == null) ||
+                    (it.tag?.startsWith(REMINDER_TAG) == true && it.tag.removePrefix(REMINDER_TAG) !in decision.validKeys)
+            }.forEach { notificationManager.cancel(it.tag, it.id) }
+            decision.deliver.forEach { postReminder(it) }
+            reminderStore.write(decision.state)
+            val active = snapshot.active
+            if (active.isEmpty()) {
+                val upcoming = if (alwaysOn) {
+                    snapshot.next
+                } else {
+                    null
+                }
+                if (upcoming == null) {
+                    notificationManager.cancel(LIVE_NOTIFICATION_ID)
+                } else {
+                    postLiveUpdate(
+                        events = listOf(upcoming.event),
+                        startMillis = upcoming.startMillis,
+                        endMillis = upcoming.endMillis,
+                        nowMillis = now,
+                        upcoming = true,
+                    )
+                }
             } else {
                 postLiveUpdate(
-                    events = listOf(upcoming.event),
-                    startMillis = upcoming.startMillis,
-                    endMillis = upcoming.endMillis,
+                    events = active.map { it.event },
+                    startMillis = active.minOf { it.startMillis },
+                    endMillis = active.maxOf { it.endMillis },
                     nowMillis = now,
-                    upcoming = true,
+                    upcoming = false,
+                    // 进行中通知的详情始终预告下一项，与「显示未来日程」开关无关——
+                    // 开关只决定空档期是否单独发通知。
+                    next = snapshot.next,
                 )
             }
-        } else {
-            postLiveUpdate(
-                events = active.map { it.event },
-                startMillis = active.minOf { it.startMillis },
-                endMillis = active.maxOf { it.endMillis },
-                nowMillis = now,
-                upcoming = false,
-                // 进行中通知的详情始终预告下一项，与「显示未来日程」开关无关——
-                // 开关只决定空档期是否单独发通知。
-                next = NotificationSchedule.nextWindowAfter(events, now, zone),
-            )
+            scheduleNextBoundary(snapshot, notifications, targets.any, progressRefreshIntervalMs(snapshot))
+            scheduleNextReminder(decision.next)
+        } finally {
+            ScheduleWidgetUpdater.refresh(appContext, events, snapshot, targets, forceWidgets)
         }
-        scheduleNextBoundary(events, now, progressRefreshIntervalMs(events, now, zone))
-        scheduleNextReminder(decision.next)
     }
 
     /**
@@ -514,20 +547,11 @@ class ScheduleNotificationCoordinator(
         }
     }
 
-    private fun scheduleNextBoundary(
-        events: List<ScheduleEvent>,
-        nowMillis: Long,
-        intervalMs: Long,
-    ) {
-        val next = BoundarySchedule.next(events, nowMillis, zone,
-            notifications = preferences.enabled.value && canPostNotifications(),
-            widgets = ScheduleWidgetUpdater.hasWidgets(appContext), intervalMs = intervalMs)
+    private fun scheduleNextBoundary(snapshot: NotificationSnapshot, notifications: Boolean,
+        widgets: Boolean, intervalMs: Long) {
+        val next = BoundarySchedule.next(snapshot, notifications, widgets, intervalMs)
         val pendingIntent = boundaryPendingIntent()
-        alarmManager.cancel(pendingIntent)
-        if (next != null) {
-            scheduleAlarm(next, pendingIntent)
-
-        }
+        if (next == null) alarmManager.cancel(pendingIntent) else scheduleAlarm(next, pendingIntent)
     }
 
     /**
@@ -535,16 +559,13 @@ class ScheduleNotificationCoordinator(
      * 同时限制在 [PROGRESS_REFRESH_MIN_MS, PROGRESS_REFRESH_MAX_MS] 之间，兼顾平滑与续航。
      * 进行中用组合窗口（多个同时进行的事件取并集），空档期用下一项窗口。
      */
-    private fun progressRefreshIntervalMs(
-        events: List<ScheduleEvent>,
-        nowMillis: Long,
-        zone: ZoneId,
-    ): Long {
-        val active = NotificationSchedule.activeAt(events, nowMillis, zone)
+    private fun progressRefreshIntervalMs(snapshot: NotificationSnapshot): Long {
+        val nowMillis = snapshot.nowMillis
+        val active = snapshot.active
         val (start, end) = if (active.isNotEmpty()) {
             active.minOf { it.startMillis } to active.maxOf { it.endMillis }
         } else {
-            val up = NotificationSchedule.nextWindowAfter(events, nowMillis, zone)
+            val up = snapshot.next
             (up?.startMillis ?: nowMillis) to (up?.endMillis ?: (nowMillis + PROGRESS_REFRESH_MAX_MS))
         }
         val durationMs = max(1L, end - start)
@@ -572,8 +593,7 @@ class ScheduleNotificationCoordinator(
      */
     private fun scheduleNextReminder(next: ReminderBatch?) {
         val pending = reminderPendingIntent()
-        alarmManager.cancel(pending)
-        if (next != null) scheduleAlarm(next.triggerMillis, pending)
+        if (next == null) alarmManager.cancel(pending) else scheduleAlarm(next.triggerMillis, pending)
     }
 
     private fun scheduleAlarm(time: Long, pending: PendingIntent) {

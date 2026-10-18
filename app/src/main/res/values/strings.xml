@@ -62,6 +62,8 @@
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">浅色</string>
     <string name="theme_dark">深色</string>
+    <string name="theme_dynamic_color_title">动态配色</string>
+    <string name="theme_dynamic_color_summary">跟随系统壁纸色调（Material You，Android 12+）</string>
     <string name="notification_section">通知</string>
     <string name="notification_toggle_title">日程实时通知</string>
     <string name="notification_toggle_summary">日程开始时提醒，并持续显示当前进度；Android 16 支持 Live Updates</string>
@@ -154,6 +156,10 @@
     <string name="edit_delete_team_message">确定要删除「%1$s」这个团队候选吗？该名称会从相关日程的团队列表中移除。</string>
     <string name="edit_delete_event_title">删除日程</string>
     <string name="edit_delete_event_message">确定删除「%1$s」吗？</string>
+    <string name="edit_discard_title">放弃未保存的修改？</string>
+    <string name="edit_discard_message">当前编辑的内容尚未保存，返回后未保存的修改将会丢失。</string>
+    <string name="edit_discard_confirm">放弃修改</string>
+    <string name="edit_discard_cancel">继续编辑</string>
 
     <string name="gap_label">空闲 %1$s</string>
     <string name="gap_ongoing">(%1$s)</string>

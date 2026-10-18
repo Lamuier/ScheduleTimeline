@@ -23,6 +23,9 @@ import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.Category
 import com.lamuier.scheduletimeline.data.ChartLayout
 import com.lamuier.scheduletimeline.data.DayStats
+import com.lamuier.scheduletimeline.data.LeasedStateFlowCache
+import com.lamuier.scheduletimeline.data.StateFlowLease
+import com.lamuier.scheduletimeline.ui.timeline.ImportStateController
 import com.lamuier.scheduletimeline.data.hasValidTime
 import com.lamuier.scheduletimeline.data.teamNames
 import com.lamuier.scheduletimeline.ui.edit.EditUiState
@@ -36,6 +39,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
@@ -69,13 +74,19 @@ class ScheduleViewModel(
     val currentDate: StateFlow<LocalDate> = _currentDate.asStateFlow()
 
     val themeMode: StateFlow<ThemeMode> = themePreferences.mode
+    val dynamicColor: StateFlow<Boolean> = themePreferences.dynamicColor
     val notificationsEnabled: StateFlow<Boolean> =
         (application as ScheduleApplication).notificationPreferences.enabled
     val liveUpdatesAlwaysOn: StateFlow<Boolean> =
         (application as ScheduleApplication).notificationPreferences.alwaysOn
 
     val dayState: StateFlow<ScheduleDayState> = _currentDate
-        .flatMapLatest { date -> observeDayState(date) }
+        .flatMapLatest { date ->
+            flow {
+                val lease = acquireDayState(date)
+                try { emitAll(lease.state) } finally { lease.close() }
+            }
+        }
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5_000),
@@ -146,37 +157,34 @@ class ScheduleViewModel(
         _currentDate.value = date
     }
 
-    /**
-     * 任意日期的事件流，供分页时间轴的每一页独立订阅。
-     * 按日期缓存共享 StateFlow（LRU 保留最近访问的若干天）：
-     * 分页回访时 `value` 即上次已加载的数据，避免每次重组都从空态闪变到真实内容。
-     * WhileSubscribed 保证页面滑出后上游查询自动停止，`.value` 仍保留最后结果。
-     */
-    private val dayFlows = object : LinkedHashMap<LocalDate, StateFlow<ScheduleDayState>>(
-        DAY_FLOW_CACHE_CAPACITY, 0.75f, true,
-    ) {
-        override fun removeEldestEntry(
-            eldest: MutableMap.MutableEntry<LocalDate, StateFlow<ScheduleDayState>>?,
-        ): Boolean = size > DAY_FLOW_CACHE_CAPACITY
-    }
-
-    fun observeDayState(date: LocalDate): StateFlow<ScheduleDayState> =
-        dayFlows.getOrPut(date) {
+    private val dayFlows = LeasedStateFlowCache<LocalDate, ScheduleDayState>(
+        scope = viewModelScope,
+        initialValue = { ScheduleDayState(it, emptyList()) },
+        idleCapacity = DAY_FLOW_CACHE_CAPACITY,
+        source = { date ->
             repository.observeDay(date.format(DateTimeFormatter.ISO_LOCAL_DATE))
                 .mapLatest { events ->
-                    // 相邻页预加载时也会构建重叠组；纯计算不占用拖动所在的主线程。
                     withContext(Dispatchers.Default) {
                         val (valid, invalid) = events.partition { it.hasValidTime }
                         ScheduleDayState(date, events, TimelineBuilder.build(valid),
                             ChartLayout.stats(valid), invalid)
                     }
                 }
-                .stateIn(
-                    viewModelScope,
-                    SharingStarted.WhileSubscribed(5_000),
-                    ScheduleDayState(date, emptyList()),
-                )
-        }
+        },
+    )
+
+    fun acquireDayState(date: LocalDate): StateFlowLease<ScheduleDayState> = dayFlows.acquire(date)
+
+    private val importController = ImportStateController(viewModelScope, savedState, currentDayKey())
+    val importUiState = importController.state
+    fun updateImportText(text: String) = importController.updateText(text)
+    fun prepareImport() = importController.updateDay(currentDayKey())
+    fun toggleImportRow(index: Int) = importController.toggle(index)
+    fun selectAllImportRows(selected: Boolean) = importController.selectAll(selected)
+    fun importSelected(expectedVersion: Long, onDone: () -> Unit = {}) {
+        val drafts = importController.selectedDrafts(expectedVersion) ?: return
+        write(onDone) { repository.importDrafts(drafts) }
+    }
 
     fun shiftDate(days: Long) {
         changeDate(_currentDate.value.plusDays(days))
@@ -198,6 +206,10 @@ class ScheduleViewModel(
 
     fun setThemeMode(mode: ThemeMode) {
         themePreferences.setMode(mode)
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        themePreferences.setDynamicColor(enabled)
     }
 
     fun setNotificationsEnabled(enabled: Boolean) {
@@ -228,7 +240,9 @@ class ScheduleViewModel(
     fun batchImport(csvText: String, onDone: () -> Unit = {}) {
         val dayKey = currentDayKey()
         write(onDone) {
-            val result = ScheduleExport.parseImportResult(csvText, fallbackDayKey = dayKey)
+            val result = withContext(Dispatchers.Default) {
+                ScheduleExport.parseImportResult(csvText, fallbackDayKey = dayKey)
+            }
             require(result.issues.isEmpty() && result.drafts.isNotEmpty())
             repository.importDrafts(result.drafts)
         }
@@ -242,7 +256,7 @@ class ScheduleViewModel(
 
     suspend fun exportCurrentDayCsv(): String {
         val events = repository.eventsForDay(currentDayKey())
-        return ScheduleExport.toCsv(events)
+        return withContext(Dispatchers.Default) { ScheduleExport.toCsv(events) }
     }
 
     fun prepareEdit(eventId: Long?, sessionId: String = "event:$eventId") {

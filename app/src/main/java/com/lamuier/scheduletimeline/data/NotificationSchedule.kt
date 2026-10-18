@@ -19,7 +19,24 @@ data class ScheduledReminder(
     val triggerMillis: Long,
 )
 
+/** One wall-clock/zone conversion per refresh, shared by reminders, progress and widgets. */
+data class NotificationSnapshot(
+    val windows: List<ScheduledEventWindow>,
+    val nowMillis: Long,
+    val zone: ZoneId,
+) {
+    val active = windows.filter { nowMillis in it.startMillis until it.endMillis }.sortedBy { it.startMillis }
+    val next = windows.filter { it.startMillis > nowMillis }.minByOrNull { it.startMillis }
+    val nextBoundary = windows.asSequence().flatMap { sequenceOf(it.startMillis, it.endMillis) }
+        .filter { it > nowMillis }.minOrNull()
+
+    fun nextRefreshAt(intervalMs: Long): Long? = if (active.isNotEmpty())
+        minOf(nextBoundary ?: Long.MAX_VALUE, nowMillis + intervalMs) else nextBoundary
+}
+
 object NotificationSchedule {
+    fun snapshot(events: List<ScheduleEvent>, nowMillis: Long, zone: ZoneId) =
+        NotificationSnapshot(windows(events, zone), nowMillis, zone)
     fun windows(
         events: List<ScheduleEvent>,
         zone: ZoneId,

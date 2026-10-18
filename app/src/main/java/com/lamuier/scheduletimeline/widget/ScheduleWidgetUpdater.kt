@@ -15,7 +15,7 @@ import com.lamuier.scheduletimeline.MainActivity
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.ScheduleApplication
 import com.lamuier.scheduletimeline.data.EventLabels
-import com.lamuier.scheduletimeline.data.NotificationSchedule
+import com.lamuier.scheduletimeline.data.NotificationSnapshot
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.ScheduledEventWindow
 import com.lamuier.scheduletimeline.data.TimeFormat
@@ -36,49 +36,72 @@ object ScheduleWidgetUpdater {
     private const val OPEN_APP_REQUEST_CODE = 0
     private const val LIST_ITEM_TEMPLATE_REQUEST_CODE = 4201
 
-    private val mutex = Mutex()
-    fun hasWidgets(context: Context): Boolean {
-        val manager = AppWidgetManager.getInstance(context)
-        return listOf(ScheduleWidgetProviderSmall::class.java, ScheduleWidgetProviderLarge::class.java)
-            .any { manager.getAppWidgetIds(ComponentName(context, it)).isNotEmpty() }
+    internal data class Targets(val small: List<Int>, val large: List<Int>) {
+        val any: Boolean get() = small.isNotEmpty() || large.isNotEmpty()
     }
-    suspend fun refreshAll(context: Context) = mutex.withLock { refreshLocked(context) }
-    private suspend fun refreshLocked(context: Context) {
+    private data class ListContent(val today: LocalDate, val events: List<ScheduleEvent>, val config: String)
+    private data class SummaryContent(val list: ListContent, val active: List<ScheduledEventWindow>,
+        val next: ScheduledEventWindow?, val ids: List<Int>)
+    private val mutex = Mutex()
+    private var lastContext: Context? = null
+    private var lastSmall: SummaryContent? = null
+    private var lastLarge: SummaryContent? = null
+    private var lastList: Pair<ListContent, List<Int>>? = null
+
+    internal fun targets(context: Context): Targets {
+        val manager = AppWidgetManager.getInstance(context)
+        return Targets(
+            manager.getAppWidgetIds(ComponentName(context, ScheduleWidgetProviderSmall::class.java)).toList(),
+            manager.getAppWidgetIds(ComponentName(context, ScheduleWidgetProviderLarge::class.java)).toList(),
+        )
+    }
+    fun hasWidgets(context: Context): Boolean = targets(context).any
+
+    internal suspend fun clearCachedViews() = mutex.withLock {
+        lastSmall = null; lastLarge = null; lastList = null
+    }
+
+    suspend fun refreshAll(context: Context) {
+        (context.applicationContext as? ScheduleApplication)?.refreshNotificationsAndWait(forceWidgets = true)
+    }
+
+    internal suspend fun refresh(context: Context, allEvents: List<ScheduleEvent>,
+        snapshot: NotificationSnapshot, targets: Targets, force: Boolean) = mutex.withLock {
         val appContext = context.applicationContext
-        val manager = AppWidgetManager.getInstance(appContext)
-        val smallIds = manager.getAppWidgetIds(
-            ComponentName(appContext, ScheduleWidgetProviderSmall::class.java),
-        )
-        val largeIds = manager.getAppWidgetIds(
-            ComponentName(appContext, ScheduleWidgetProviderLarge::class.java),
-        )
-        if (smallIds.isEmpty() && largeIds.isEmpty()) return
-
-        val application = appContext as? ScheduleApplication ?: return
-        val now = System.currentTimeMillis()
-        val zone = ZoneId.systemDefault()
-        val today = LocalDate.now()
-        val todayKey = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val events = runCatching { application.repository.eventsForDay(todayKey) }
-            .getOrDefault(emptyList())
-
-        val windows = NotificationSchedule.windows(events, zone)
-        val active = windows
-            .filter { now in it.startMillis until it.endMillis }
-            .sortedBy { it.startMillis }
-        val next = windows
-            .filter { it.startMillis > now }
-            .minByOrNull { it.startMillis }
-
-        smallIds.forEach { id ->
-            manager.updateAppWidget(id, buildSmall(appContext, today, events, active, next))
+        if (lastContext !== appContext) {
+            lastContext = appContext
+            lastSmall = null; lastLarge = null; lastList = null
         }
-        if (largeIds.isNotEmpty()) {
-            val largeViews = buildLarge(appContext, today, events, active, next)
-            largeIds.forEach { id ->
-                manager.updateAppWidget(id, largeViews)
+        if (!targets.any) {
+            lastSmall = null; lastLarge = null; lastList = null
+            return@withLock
+        }
+        val manager = AppWidgetManager.getInstance(appContext)
+        val today = java.time.Instant.ofEpochMilli(snapshot.nowMillis).atZone(snapshot.zone).toLocalDate()
+        val todayKey = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val events = allEvents.filter { it.dayKey == todayKey }
+        val windows = snapshot.windows.filter { it.event.dayKey == todayKey }
+        val active = snapshot.active.filter { it.event.dayKey == todayKey }
+        val next = windows.filter { it.startMillis > snapshot.nowMillis }.minByOrNull { it.startMillis }
+        val list = ListContent(today, events, appContext.resources.configuration.toString())
+        val small = SummaryContent(list, active, next, targets.small)
+        val large = SummaryContent(list, active, next, targets.large)
+        if (targets.small.isEmpty()) lastSmall = null
+        else if (force || lastSmall != small) {
+            manager.updateAppWidget(targets.small.toIntArray(), buildSmall(appContext, today, events, active, next))
+            lastSmall = small
+        }
+        if (targets.large.isEmpty()) { lastLarge = null; lastList = null }
+        else {
+            if (force || lastLarge != large) {
+                manager.updateAppWidget(targets.large.toIntArray(), buildLarge(appContext, today, events, active, next))
+                lastLarge = large
             }
-            manager.notifyAppWidgetViewDataChanged(largeIds, R.id.widget_list)
+            val dataset = list to targets.large
+            if (force || lastList != dataset) {
+                manager.notifyAppWidgetViewDataChanged(targets.large.toIntArray(), R.id.widget_list)
+                lastList = dataset
+            }
         }
     }
 

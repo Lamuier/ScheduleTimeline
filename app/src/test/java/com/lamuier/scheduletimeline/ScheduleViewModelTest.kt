@@ -112,8 +112,9 @@ class ScheduleViewModelTest {
         val invalidId = database.scheduleEventDao().upsert(invalid)
         val vm = model()
         val date = java.time.LocalDate.parse(event.dayKey)
-        val page = vm.observeDayState(date)
-        assertSame(page, vm.observeDayState(date))
+        val pageLease = vm.acquireDayState(date)
+        val page = pageLease.state
+        vm.acquireDayState(date).use { assertSame(page, it.state) }
         val prepared = withTimeout(5000) { page.first { it.events.size == 2 } }
         assertEquals(listOf(id), prepared.items.filterIsInstance<TimelineItem.Event>().map { it.event.id })
         assertEquals(1, prepared.stats?.eventCount)
@@ -126,5 +127,17 @@ class ScheduleViewModelTest {
         assertTrue(changed.items.isEmpty())
         assertNull(changed.stats)
         assertEquals(listOf(invalidId), changed.invalidEvents.map { it.id })
+        pageLease.close()
+    }
+
+    @Test fun dynamicColorPreferenceTogglesAndPersists() {
+        val vm = model()
+        assertFalse(vm.dynamicColor.value)
+        vm.setDynamicColor(true)
+        assertTrue(vm.dynamicColor.value)
+        val newVm = model()
+        assertTrue(newVm.dynamicColor.value)
+        newVm.setDynamicColor(false)
+        assertFalse(newVm.dynamicColor.value)
     }
 }

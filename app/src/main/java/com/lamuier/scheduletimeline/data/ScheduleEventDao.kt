@@ -70,6 +70,19 @@ interface ScheduleEventDao {
     @Query("SELECT * FROM schedule_events ORDER BY dayKey ASC, startMinutes ASC, endMinutes ASC")
     suspend fun getAll(): List<ScheduleEvent>
 
+    // A full merge slot can only match when these three fields match. Keep type/kind
+    // normalization in EventMerge; this query deliberately allows false positives.
+    @Query("""
+        SELECT e.* FROM schedule_events e
+        INNER JOIN (
+            SELECT dayKey, startMinutes, endMinutes FROM schedule_events
+            GROUP BY dayKey, startMinutes, endMinutes HAVING COUNT(*) > 1
+        ) duplicates ON e.dayKey = duplicates.dayKey
+            AND e.startMinutes = duplicates.startMinutes AND e.endMinutes = duplicates.endMinutes
+        ORDER BY e.dayKey ASC, e.startMinutes ASC, e.endMinutes ASC
+    """)
+    suspend fun getMergeCandidates(): List<ScheduleEvent>
+
     @Query("SELECT DISTINCT dayKey FROM schedule_events ORDER BY dayKey ASC")
     suspend fun distinctDayKeys(): List<String>
 

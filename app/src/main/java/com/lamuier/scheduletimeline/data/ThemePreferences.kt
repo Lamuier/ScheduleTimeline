@@ -22,13 +22,22 @@ class ThemePreferences(context: Context) {
     private val _mode = MutableStateFlow(ThemeMode.fromStorage(prefs.getString(KEY_MODE, null)))
     val mode: StateFlow<ThemeMode> = _mode.asStateFlow()
 
+    private val _dynamicColor = MutableStateFlow(prefs.getBoolean(KEY_DYNAMIC_COLOR, false))
+    val dynamicColor: StateFlow<Boolean> = _dynamicColor.asStateFlow()
+
     fun setMode(mode: ThemeMode) {
         prefs.edit().putString(KEY_MODE, mode.name).apply()
         _mode.value = mode
     }
 
+    fun setDynamicColor(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_DYNAMIC_COLOR, enabled).apply()
+        _dynamicColor.value = enabled
+    }
+
     private companion object {
         const val PREFS = "theme_prefs"
         const val KEY_MODE = "theme_mode"
+        const val KEY_DYNAMIC_COLOR = "theme_dynamic_color"
     }
 }

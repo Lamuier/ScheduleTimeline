@@ -19,6 +19,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +68,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -118,6 +123,7 @@ fun ManageDataSheet(
     val exportShareTitle = stringResource(R.string.export_share_title)
     var currentStep by rememberSaveable { mutableStateOf(if (openAtImport) ManageStep.Import else ManageStep.Menu) }
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val dynamicColor by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val writeState by viewModel.writeState.collectAsStateWithLifecycle()
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
     val liveUpdatesAlwaysOn by viewModel.liveUpdatesAlwaysOn.collectAsStateWithLifecycle()
@@ -133,8 +139,8 @@ fun ManageDataSheet(
             // 关闭只保留点击遮罩与系统返回
 
         ),
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() },
     ) {
         if (writeState.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         if (writeState.failed) Text(stringResource(R.string.operation_failed),
@@ -157,6 +163,8 @@ fun ManageDataSheet(
                 ManageStep.Menu -> MainMenu(
                     themeMode = themeMode,
                     onThemeModeChange = viewModel::setThemeMode,
+                    dynamicColor = dynamicColor,
+                    onDynamicColorChange = viewModel::setDynamicColor,
                     notificationsEnabled = notificationsEnabled,
                     liveUpdatesAlwaysOn = liveUpdatesAlwaysOn,
                     onNotificationsEnabledChange = { enabled ->
@@ -203,16 +211,16 @@ fun ManageDataSheet(
                 )
                 ManageStep.Import -> {
                     val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
-                    val fallbackDayKey = remember(currentDate) {
-                        currentDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                    }
+                    val importState by viewModel.importUiState.collectAsStateWithLifecycle()
+                    LaunchedEffect(currentDate) { viewModel.prepareImport() }
                     ImportView(
-                        fallbackDayKey = fallbackDayKey,
+                        state = importState,
                         busy = writeState.busy,
+                        onTextChange = viewModel::updateImportText,
+                        onToggle = viewModel::toggleImportRow,
+                        onSetAll = viewModel::selectAllImportRows,
                         onBack = { if (!writeState.busy) currentStep = ManageStep.Menu },
-                        onImport = { csv ->
-                            viewModel.batchImport(csv, onDone = onDismiss)
-                        },
+                        onImport = { viewModel.importSelected(importState.inputVersion, onDone = onDismiss) },
                     )
                 }
                 ManageStep.ClearConfirm -> ClearConfirmView(
@@ -226,7 +234,7 @@ fun ManageDataSheet(
                 )
                 ManageStep.ClearDayConfirm -> {
                     val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
-                    val dayState by viewModel.observeDayState(currentDate)
+                    val dayState by rememberDayState(viewModel, currentDate)
                         .collectAsStateWithLifecycle()
                     val pattern = stringResource(R.string.date_pattern)
                     val dateText = remember(currentDate, pattern) {
@@ -255,6 +263,8 @@ fun ManageDataSheet(
 private fun MainMenu(
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColorChange: (Boolean) -> Unit,
     notificationsEnabled: Boolean,
     liveUpdatesAlwaysOn: Boolean,
     onNotificationsEnabledChange: (Boolean) -> Unit,
@@ -287,6 +297,16 @@ private fun MainMenu(
             selected = themeMode,
             onSelected = onThemeModeChange,
         )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Spacer(Modifier.height(8.dp))
+            NotificationToggleRow(
+                title = stringResource(R.string.theme_dynamic_color_title),
+                summary = stringResource(R.string.theme_dynamic_color_summary),
+                checked = dynamicColor,
+                onCheckedChange = onDynamicColorChange,
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
 
@@ -579,31 +599,23 @@ private fun ActionRow(
 
 @Composable
 private fun ImportView(
-    fallbackDayKey: String,
+    state: ImportUiState,
     busy: Boolean = false,
+    onTextChange: (String) -> Unit,
+    onToggle: (Int) -> Unit,
+    onSetAll: (Boolean) -> Unit,
     onBack: () -> Unit,
-    onImport: (String) -> Unit,
+    onImport: () -> Unit,
 ) {
-    var text by rememberSaveable { mutableStateOf("") }
-    val parseResult = remember(text, fallbackDayKey) {
-        ScheduleExport.parseImportResult(text, fallbackDayKey)
-    }
-    val previewEvents = parseResult.drafts.map { it.event }
-    var selectedIndexes by remember(previewEvents) {
-        mutableStateOf(previewEvents.indices.toSet())
-    }
-    val selectedEvents = previewEvents.filterIndexed { index, _ -> index in selectedIndexes }
     val dark = LocalDarkTheme.current
     val sample = ScheduleExport.IMPORT_SAMPLE
     val aiPrompt = ScheduleExport.IMPORT_AI_PROMPT
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp),
+    LazyColumn(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 20.dp),
     ) {
-        parseResult.issues.forEach { issue ->
+        items(state.issues) { issue ->
             val reason = when (issue.error) {
                 com.lamuier.scheduletimeline.data.ImportError.Fields -> R.string.import_error_fields
                 com.lamuier.scheduletimeline.data.ImportError.Date -> R.string.import_error_date
@@ -617,83 +629,81 @@ private fun ImportView(
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
 
-        SheetHeader(
-            title = stringResource(R.string.cd_batch_import),
-            subtitle = stringResource(R.string.import_hint),
-            leading = {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.cd_back),
-                    )
-                }
-            },
-        )
-
-        ImportSampleHint(sample = sample, aiPrompt = aiPrompt)
-
-        Spacer(Modifier.height(14.dp))
-
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            placeholder = {
-                Text(
-                    text = sample,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                )
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(148.dp),
-            shape = RoundedCornerShape(16.dp),
-            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-            ),
-        )
-
-        Spacer(Modifier.height(16.dp))
-
-        PreviewSection(
-            events = previewEvents,
-            selectedIndexes = selectedIndexes,
-            onToggle = { index ->
-                selectedIndexes = if (index in selectedIndexes) {
-                    selectedIndexes - index
-                } else {
-                    selectedIndexes + index
-                }
-            },
-            onSetAll = { all ->
-                selectedIndexes = if (all) previewEvents.indices.toSet() else emptySet()
-            },
-            sample = sample,
-            dark = dark,
-        )
-
-        Spacer(Modifier.height(18.dp))
-
-        Button(
-            onClick = { onImport(ScheduleExport.toCsv(selectedEvents)) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            enabled = selectedEvents.isNotEmpty() && !busy,
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.action_import),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+        item {
+            SheetHeader(
+                title = stringResource(R.string.cd_batch_import),
+                subtitle = stringResource(R.string.import_hint),
+                leading = {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.cd_back),
+                        )
+                    }
+                },
             )
+
+            ImportSampleHint(sample = sample, aiPrompt = aiPrompt)
+
+            Spacer(Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = state.text,
+                onValueChange = onTextChange,
+                placeholder = {
+                    Text(
+                        text = sample,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(148.dp),
+                shape = RoundedCornerShape(16.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                ),
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+        }
+        item {
+            PreviewSection(
+                events = state.previewEvents,
+                selectedIndexes = state.selectedIndexes,
+                onToggle = onToggle,
+                onSetAll = onSetAll,
+                sample = sample,
+                dark = dark,
+            )
+
+        }
+        item {
+            Spacer(Modifier.height(18.dp))
+
+            Button(
+                onClick = onImport,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                enabled = state.canImport && !busy,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.action_import),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+        }
         }
     }
 }
@@ -708,6 +718,7 @@ private fun ImportSampleHint(sample: String, aiPrompt: String) {
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
+            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -725,7 +736,10 @@ private fun ImportSampleHint(sample: String, aiPrompt: String) {
                 }
                 Spacer(Modifier.width(10.dp))
                 Surface(
-                    onClick = { copyImportAiPrompt(context, aiPrompt) },
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        copyImportAiPrompt(context, aiPrompt)
+                    },
                     shape = RoundedCornerShape(50),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -751,7 +765,10 @@ private fun ImportSampleHint(sample: String, aiPrompt: String) {
                     .fillMaxWidth()
                     .combinedClickable(
                         onClick = {},
-                        onLongClick = { copyImportSample(context, sample) },
+                        onLongClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            copyImportSample(context, sample)
+                        },
                     ),
             ) {
                 Text(
@@ -793,7 +810,7 @@ private fun copyToClipboard(context: Context, label: String, text: String, toast
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PreviewSection(
+internal fun PreviewSection(
     events: List<ScheduleEvent>,
     selectedIndexes: Set<Int>,
     onToggle: (Int) -> Unit,
@@ -842,7 +859,7 @@ private fun PreviewSection(
             }
         }
 
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 72.dp, max = 200.dp)
@@ -852,12 +869,12 @@ private fun PreviewSection(
                     1.dp,
                     MaterialTheme.colorScheme.outlineVariant,
                     RoundedCornerShape(16.dp),
-                )
-                .verticalScroll(rememberScrollState())
-                .padding(10.dp),
+                ),
+            contentPadding = PaddingValues(10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (events.isEmpty()) {
+                item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -878,8 +895,9 @@ private fun PreviewSection(
                         modifier = Modifier.padding(horizontal = 12.dp),
                     )
                 }
+                }
             } else {
-                events.forEachIndexed { index, event ->
+                itemsIndexed(events) { index, event ->
                     ImportPreviewRow(
                         event = event,
                         selected = index in selectedIndexes,
@@ -1061,6 +1079,8 @@ private fun MainMenuPreview() {
             MainMenu(
                 themeMode = ThemeMode.System,
                 onThemeModeChange = {},
+                dynamicColor = false,
+                onDynamicColorChange = {},
                 notificationsEnabled = true,
                 liveUpdatesAlwaysOn = true,
                 onNotificationsEnabledChange = {},
@@ -1080,7 +1100,8 @@ private fun ImportViewPreview() {
     ScheduleTimelineTheme {
         Surface {
             ImportView(
-                fallbackDayKey = "2026-07-12",
+                state = ImportUiState(fallbackDayKey = "2026-07-12"),
+                onTextChange = {}, onToggle = {}, onSetAll = {},
                 onBack = {},
                 onImport = {},
             )

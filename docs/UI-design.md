@@ -27,18 +27,21 @@
 | `RedLocation` / `error` | `#EF4444` | 地点强调、错误、冲突相关 |
 | `WarningAmber` | `#F59E0B` | 警告条（与空闲同色系时可复用 secondary） |
 
-### 表面（浅色）
+### 表面与容器（Material Design 3）
 
-| Token | 色值 | 用途 |
-|---|---|---|
-| `background` | `#F6F5FA` | 页面底 |
-| `surface` | `#FFFFFF` | 卡片、顶栏 |
-| `surfaceVariant` | `#EDECF4` | 弱分区、芯片底 |
-| `onSurface` | `#1B1A21` | 主文字 |
-| `onSurfaceVariant` | `#5F5C6B` | 次文字 |
-| `outlineVariant` | `#E3E1EC` | 分割线、描边 |
+遵循 M3 色调高程（Tonal Elevation）与 Surface Container 体系：
 
-深色方案以 `DarkColors` 为准；状态栏 / 导航栏外观随 `LocalDarkTheme` 切换。
+| Token | 浅色色值 | 深色色值 | 用途 |
+|---|---|---|---|
+| `background` | `#F6F5FA` | `#141318` | 页面最底层底色 |
+| `surface` | `#FFFFFF` | `#1E1C24` | 基础平面 |
+| `surfaceContainerLowest` | `#FFFFFF` | `#0F0E13` | 对比卡片最底 |
+| `surfaceContainerLow` | `#F6F5FA` | `#1A1820` | 模态底栏（ModalBottomSheet） |
+| `surfaceContainer` | `#F0EFF6` | `#211F26` | 标准容器（输入框、顶栏） |
+| `surfaceContainerHigh` | `#EAE8F1` | `#2B2931` | 对话框、顶栏胶囊控件 |
+| `surfaceContainerHighest` | `#E4E2EB` | `#36343C` | 芯片与强调控件 |
+
+深色方案以 `DarkColors` 为准；状态栏 / 导航栏外观随 `LocalDarkTheme` 切换。Android 12+ 支持开启动态配色（Material You），随系统壁纸色调智能调整基础色阶。
 
 ### 分类色
 

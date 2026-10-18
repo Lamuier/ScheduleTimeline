@@ -62,8 +62,9 @@ class MainActivity : ComponentActivity() {
                 pendingAlwaysOn = false
             }
             val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+            val dynamicColor by viewModel.dynamicColor.collectAsStateWithLifecycle()
 
-            ScheduleTimelineTheme(themeMode = themeMode) {
+            ScheduleTimelineTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
                 val navController = rememberNavController()
 
                 // 桌面小组件点击日程项深链：打开对应事件编辑页

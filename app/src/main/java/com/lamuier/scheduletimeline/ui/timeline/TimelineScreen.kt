@@ -68,7 +68,7 @@ fun TimelineScreen(
             onOpenImportConsumed()
         }
     }
-    val time by rememberScheduleTime(clock)
+    val timeState = rememberScheduleTime(clock)
     val scheduledDayKeys by viewModel.scheduledDayKeys.collectAsStateWithLifecycle()
 
     // 无限分页：页码围绕中心页展开，每页对应 baseDate 的前后偏移一天。
@@ -76,8 +76,8 @@ fun TimelineScreen(
     // AnimatedContent 的双段动画（拖动与切换动画脱节导致的不连贯）。
     var baseDate by remember { mutableStateOf(viewModel.currentDate.value) }
     val pagerState = rememberPagerState(initialPage = DAY_PAGE_CENTER) { DAY_PAGE_COUNT }
-    val dateForPage: (Int) -> LocalDate = { page ->
-        baseDate.plusDays((page - DAY_PAGE_CENTER).toLong())
+    val dateForPage: (Int) -> LocalDate = remember(baseDate) {
+        { page -> baseDate.plusDays((page - DAY_PAGE_CENTER).toLong()) }
     }
 
     // Only a real drag may commit a pager date; cancelled animations do not own the date.
@@ -88,23 +88,25 @@ fun TimelineScreen(
 
     // 按钮直接发起分页操作；返回今天、最近日程及日期选择不等待弹簧吸附。
     // requestedDate 区分自己的导航与外部 Shortcut，避免日期流反过来重启动画。
-    val navigateToDate: (LocalDate, Boolean) -> Unit = { date, animate ->
-        wasScrolling = false
-        navigationJob?.cancel()
-        requestedDate = date
-        viewModel.changeDate(date)
-        val distance = date.toEpochDay() - baseDate.toEpochDay()
-        if (distance !in -(DAY_PAGE_CENTER - 2L)..(DAY_PAGE_CENTER - 3L)) {
-            baseDate = date
-            pagerState.requestScrollToPage(DAY_PAGE_CENTER)
-        } else {
-            val target = DAY_PAGE_CENTER + distance.toInt()
-            if (animate && abs(target - pagerState.currentPage) <= 3) {
-                navigationJob = scope.launch {
-                    pagerState.animateScrollToPage(target, animationSpec = tween(180))
-                }
+    val navigateToDate: (LocalDate, Boolean) -> Unit = remember(baseDate, pagerState) {
+        { date, animate ->
+            wasScrolling = false
+            navigationJob?.cancel()
+            requestedDate = date
+            viewModel.changeDate(date)
+            val distance = date.toEpochDay() - baseDate.toEpochDay()
+            if (distance !in -(DAY_PAGE_CENTER - 2L)..(DAY_PAGE_CENTER - 3L)) {
+                baseDate = date
+                pagerState.requestScrollToPage(DAY_PAGE_CENTER)
             } else {
-                pagerState.requestScrollToPage(target)
+                val target = DAY_PAGE_CENTER + distance.toInt()
+                if (animate && abs(target - pagerState.currentPage) <= 3) {
+                    navigationJob = scope.launch {
+                        pagerState.animateScrollToPage(target, animationSpec = tween(180))
+                    }
+                } else {
+                    pagerState.requestScrollToPage(target)
+                }
             }
         }
     }
@@ -168,16 +170,20 @@ fun TimelineScreen(
             ) { page ->
                 val pageDate = dateForPage(page)
                 // ViewModel 按日期缓存共享 StateFlow：回访页 initialValue 即上次数据，不再从空态闪变。
-                val pageState by remember(pageDate) { viewModel.observeDayState(pageDate) }
+                val pageState by rememberDayState(viewModel, pageDate)
                     .collectAsStateWithLifecycle()
                 val nearestHint = remember(pageDate, scheduledDayKeys, pageState.events.isEmpty()) {
                     if (pageState.events.isEmpty()) {
                         ScheduleExport.nearestScheduleHint(pageDate, scheduledDayKeys)
                     } else null
                 }
+                val today = timeState.value.today
+                val isToday = pageDate == today
+                val nowMinutes = if (isToday) timeState.value.minutes else null
                 DayPage(
                     state = pageState,
-                    time = time,
+                    isToday = isToday,
+                    nowMinutes = nowMinutes,
                     nearestHint = nearestHint,
                     onJumpToNearest = { hint ->
                         runCatching { LocalDate.parse(hint.dayKey) }.getOrNull()?.let {
@@ -188,10 +194,13 @@ fun TimelineScreen(
                 )
             }
 
-            if (displayedDate != time.today) {
+            val isNotToday by remember(displayedDate, timeState) {
+                derivedStateOf { displayedDate != timeState.value.today }
+            }
+            if (isNotToday) {
                 val backToTodayLabel = stringResource(R.string.action_back_to_today)
                 ExtendedFloatingActionButton(
-                    onClick = { navigateToDate(time.today, false) },
+                    onClick = { navigateToDate(timeState.value.today, false) },
                     icon = {
                         Icon(
                             Icons.Default.DateRange,
@@ -289,7 +298,8 @@ private const val DAY_PAGE_CENTER = DAY_PAGE_COUNT / 2
 @Composable
 private fun DayPage(
     state: ScheduleDayState,
-    time: ScheduleTimeSnapshot,
+    isToday: Boolean,
+    nowMinutes: Int?,
     nearestHint: NearestScheduleHint?,
     onJumpToNearest: (NearestScheduleHint) -> Unit,
     onSelectEvent: (TimelineItem.Event) -> Unit,
@@ -297,12 +307,9 @@ private fun DayPage(
     val pageItems = state.items
     val pageStats = state.stats
     val events = state.events
-    val isToday = state.date == time.today
-    val nowMinutes = time.minutes
-    val effectiveNow = if (isToday) nowMinutes else null
 
     Column(modifier = Modifier.fillMaxSize().testTag("day-page-${state.date}")) {
-        if (isToday) {
+        if (isToday && nowMinutes != null) {
             CurrentStatusBanner(pageItems, nowMinutes)
         }
 
@@ -329,7 +336,7 @@ private fun DayPage(
             TimelineList(
                 items = pageItems,
                 events = events,
-                nowMinutes = effectiveNow,
+                nowMinutes = nowMinutes,
                 onSelectEvent = onSelectEvent,
             )
         }
@@ -338,23 +345,49 @@ private fun DayPage(
 
 @Composable
 private fun CurrentStatusBanner(items: List<TimelineItem>, nowMinutes: Int) {
-    val eventItems = items.flatMap { item ->
+    val currentEvents = mutableListOf<TimelineItem.Event>()
+    var completedCountNow = 0
+    var isCurrentGap = false
+    var nextEvent: TimelineItem.Event? = null
+
+    for (item in items) {
         when (item) {
-            is TimelineItem.Event -> listOf(item)
-            is TimelineItem.OverlapGroup -> item.events
-            is TimelineItem.Gap -> emptyList()
+            is TimelineItem.Event -> {
+                if (nowMinutes in item.startMinutes until item.endMinutes) {
+                    if (item.event.completed) {
+                        completedCountNow++
+                    } else {
+                        currentEvents.add(item)
+                    }
+                } else if (!item.event.completed && item.startMinutes > nowMinutes) {
+                    if (nextEvent == null || item.startMinutes < nextEvent.startMinutes) {
+                        nextEvent = item
+                    }
+                }
+            }
+            is TimelineItem.OverlapGroup -> {
+                for (ev in item.events) {
+                    if (nowMinutes in ev.startMinutes until ev.endMinutes) {
+                        if (ev.event.completed) {
+                            completedCountNow++
+                        } else {
+                            currentEvents.add(ev)
+                        }
+                    } else if (!ev.event.completed && ev.startMinutes > nowMinutes) {
+                        if (nextEvent == null || ev.startMinutes < nextEvent.startMinutes) {
+                            nextEvent = ev
+                        }
+                    }
+                }
+            }
+            is TimelineItem.Gap -> {
+                if (nowMinutes in item.startMinutes until item.endMinutes) {
+                    isCurrentGap = true
+                }
+            }
         }
     }
-    val occupyingNow = eventItems.filter {
-        nowMinutes in it.startMinutes until it.endMinutes
-    }
-    val currentEvents = occupyingNow.filter { !it.event.completed }
-    val completedOnlyNow = occupyingNow.isNotEmpty() && currentEvents.isEmpty()
-    val currentGap = items.filterIsInstance<TimelineItem.Gap>()
-        .find { nowMinutes in it.startMinutes until it.endMinutes }
-    val nextEvent = eventItems
-        .filter { !it.event.completed && it.startMinutes > nowMinutes }
-        .minByOrNull { it.startMinutes }
+    val completedOnlyNow = currentEvents.isEmpty() && completedCountNow > 0
 
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
@@ -386,7 +419,7 @@ private fun CurrentStatusBanner(items: List<TimelineItem>, nowMinutes: Int) {
                             it.event.teamDisplay.ifBlank { it.event.title }
                         },
                     )
-                    currentGap != null || completedOnlyNow -> stringResource(R.string.status_free)
+                    isCurrentGap || completedOnlyNow -> stringResource(R.string.status_free)
                     else -> stringResource(R.string.status_none)
                 }
                 Text(

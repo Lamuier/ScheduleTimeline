@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -82,8 +84,49 @@ fun EditEventScreen(
     var pickingStart by remember { mutableStateOf(false) }
     var pickingEnd by remember { mutableStateOf(false) }
     var teamToDelete by remember { mutableStateOf<String?>(null) }
+    var showDiscardConfirm by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = writeState.busy) { }
+    var initialLoadedState by remember(sessionId) { mutableStateOf<EditUiState?>(null) }
+    LaunchedEffect(state.sessionId, state.error) {
+        if (state.sessionId == sessionId && state.error != EditValidationError.Loading && initialLoadedState == null) {
+            initialLoadedState = state
+        }
+    }
+
+    val isDirty by remember(state, initialLoadedState) {
+        androidx.compose.runtime.derivedStateOf {
+            val initial = initialLoadedState
+            if (initial == null) {
+                state.teamNames.isNotEmpty() || state.teamInput.isNotBlank() ||
+                    state.title.isNotBlank() || state.location.isNotBlank() || state.note.isNotBlank()
+            } else {
+                state.teamNames != initial.teamNames ||
+                    state.teamInput != initial.teamInput ||
+                    state.eventType != initial.eventType ||
+                    state.tokutenKind != initial.tokutenKind ||
+                    state.title != initial.title ||
+                    state.location != initial.location ||
+                    state.startMinutes != initial.startMinutes ||
+                    state.endMinutes != initial.endMinutes ||
+                    state.note != initial.note
+            }
+        }
+    }
+
+    val requestBack = {
+        if (!writeState.busy) {
+            if (isDirty) {
+                showDiscardConfirm = true
+            } else {
+                onBack()
+            }
+        }
+    }
+
+    BackHandler(enabled = !writeState.busy && isDirty) {
+        showDiscardConfirm = true
+    }
+
     LaunchedEffect(sessionId) {
         viewModel.prepareEdit(eventId, sessionId)
     }
@@ -91,8 +134,8 @@ fun EditEventScreen(
     EditEventContent(
         state = if (writeState.failed) state.copy(error = EditValidationError.WriteFailed) else state,
         busy = writeState.busy || state.error == EditValidationError.Loading,
-        teamNames = teams.map { it.name },
-        onBack = { if (!writeState.busy) onBack() },
+        teamNames = remember(teams) { teams.map { it.name } },
+        onBack = requestBack,
         onEventTypeChange = viewModel::setEditEventType,
         onTokutenKindChange = { kind ->
             viewModel.updateEdit { s -> s.copy(tokutenKind = kind) }
@@ -109,6 +152,30 @@ fun EditEventScreen(
         onRequestDelete = { showDeleteConfirm = true },
         onRequestDeleteTeam = { teamToDelete = it },
     )
+
+    if (showDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirm = false },
+            title = { Text(stringResource(R.string.edit_discard_title)) },
+            text = { Text(stringResource(R.string.edit_discard_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardConfirm = false
+                    onBack()
+                }) {
+                    Text(
+                        stringResource(R.string.edit_discard_confirm),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardConfirm = false }) {
+                    Text(stringResource(R.string.edit_discard_cancel))
+                }
+            },
+        )
+    }
 
     teamToDelete?.let { name ->
         AlertDialog(
@@ -319,13 +386,12 @@ private fun EditEventContent(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    teamNames.forEach { candidate ->
+                val selectedTeams = remember(state.teamNames) { state.teamNames.toSet() }
+                val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(teamNames, key = { it }) { candidate ->
                         val colors = eventTypeColors(state.eventType).adaptTo(LocalDarkTheme.current)
-                        val isSelected = candidate in state.teamNames
+                        val isSelected = candidate in selectedTeams
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = if (isSelected) {
@@ -342,7 +408,10 @@ private fun EditEventContent(
                                 .clip(RoundedCornerShape(10.dp))
                                 .combinedClickable(
                                     onClick = { onToggleTeam(candidate) },
-                                    onLongClick = { onRequestDeleteTeam(candidate) },
+                                    onLongClick = {
+                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                        onRequestDeleteTeam(candidate)
+                                    },
                                 ),
                         ) {
                             Text(

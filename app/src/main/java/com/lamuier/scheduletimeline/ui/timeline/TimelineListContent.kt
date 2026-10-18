@@ -56,9 +56,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.lamuier.scheduletimeline.data.TimelineTextMetrics
 import com.lamuier.scheduletimeline.data.TimelineLayoutPlan
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -73,6 +78,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -113,16 +122,36 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
+private val LocalAxisMetrics = staticCompositionLocalOf<AxisTextMetrics?> { null }
+private val LocalRegularMetrics = staticCompositionLocalOf<TimelineTextMetrics?> { null }
+
 private data class AxisTextMetrics(val width: Dp, val linePx: Float)
 
 @Composable
 private fun rememberAxisTextMetrics(): AxisTextMetrics {
+    LocalAxisMetrics.current?.let { return it }
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
     return remember(density, style, measurer) {
         val size = measurer.measure("23:59", style, maxLines = 1).size
         AxisTextMetrics(with(density) { size.width.toDp().coerceAtLeast(46.dp) }, size.height.toFloat())
+    }
+}
+
+@Composable
+private fun rememberRegularTextMetrics(): TimelineTextMetrics {
+    LocalRegularMetrics.current?.let { return it }
+    val density = LocalDensity.current
+    val typography = MaterialTheme.typography
+    val measurer = rememberTextMeasurer()
+    return remember(density, typography, measurer) {
+        fun height(style: androidx.compose.ui.text.TextStyle) = with(density) {
+            measurer.measure("团队 23:59", style, maxLines = 1).size.height.toDp().value
+        }
+        TimelineTextMetrics(time = maxOf(24f, height(typography.labelLarge)),
+            title = height(typography.titleMedium), completed = height(typography.labelSmall),
+            subtitle = height(typography.bodyMedium))
     }
 }
 
@@ -136,6 +165,7 @@ internal fun TimelineList(
     // 用 LazyListState 直接取可见 item 在视口内的 offset/size，避免 onPlaced 坐标空间错位。
     val listState = rememberLazyListState()
     val axisText = rememberAxisTextMetrics()
+    val regularMetrics = rememberRegularTextMetrics()
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val typography = MaterialTheme.typography
@@ -147,9 +177,12 @@ internal fun TimelineList(
             height(typography.labelSmall), height(typography.bodyMedium))
     }
     val plans = remember(items, textMetrics) {
-        items.filterIsInstance<TimelineItem.OverlapGroup>().associateWith {
+        items.filterIsInstance<TimelineItem.OverlapGroup>().associateWithTo(java.util.IdentityHashMap()) {
             TimelineLayoutPlan.build(it, textMetrics)
         }
+    }
+    val nowItemIndex = remember(items, nowMinutes) {
+        nowMinutes?.let { now -> items.indices.firstOrNull { itemCoversLiveNow(items[it], now) } }
     }
     val nowItemKey = remember(items, nowMinutes) {
         nowMinutes?.let { now -> nowContainingItemKey(items, now) }
@@ -157,141 +190,157 @@ internal fun TimelineList(
     var lastCenteredKey by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize().clipToBounds()) {
-        // 有「现在」落点时上下各留半屏空白，才能把时间线滚到视口正中（含当天第一条/最后一条）。
-        val extraPad = if (nowItemKey != null) maxHeight / 2 else 8.dp
-        val bottomPad = extraPad.coerceAtLeast(80.dp)
-        val nowMetrics = with(density) {
-            val labelLinePx = axisText.linePx
-            NowLineMetrics(
-                plans = plans,
-                bottomPadPx = NowAxisBottomPad.toPx(),
-                labelLinePx = labelLinePx,
-                laneHeaderPx = 16.sp.toPx() + NowLaneLabelGap.toPx(),
-                fontScale = fontScale,
-                pxPerDp = this.density,
-            )
-        }
+    CompositionLocalProvider(LocalAxisMetrics provides axisText, LocalRegularMetrics provides regularMetrics) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().clipToBounds()) {
+            // 有「现在」落点时上下各留半屏空白，才能把时间线滚到视口正中（含当天第一条/最后一条）。
+            val extraPad = if (nowItemKey != null) maxHeight / 2 else 8.dp
+            val bottomPad = extraPad.coerceAtLeast(80.dp)
+            val nowMetrics = with(density) {
+                val labelLinePx = axisText.linePx
+                NowLineMetrics(
+                    plans = plans,
+                itemIndex = nowItemIndex,
+                    bottomPadPx = NowAxisBottomPad.toPx(),
+                    labelLinePx = labelLinePx,
+                    laneHeaderPx = 16.sp.toPx() + NowLaneLabelGap.toPx(),
+                    fontScale = fontScale,
+                    pxPerDp = this.density,
+                )
+            }
 
-        LaunchedEffect(nowItemKey, items, extraPad, nowMetrics) {
-            val now = nowMinutes
-            if (now == null || nowItemKey == null || nowItemKey == lastCenteredKey) return@LaunchedEffect
-            centerNowLine(listState, items, now, nowMetrics)
-            lastCenteredKey = nowItemKey
-        }
-
-        val jumpDirection by remember(items, nowMinutes, nowItemKey, nowMetrics) {
-            derivedStateOf {
+            LaunchedEffect(nowItemKey, items, extraPad, nowMetrics) {
                 val now = nowMinutes
-                if (now == null || nowItemKey == null || items.isEmpty()) {
-                    null
-                } else {
-                    nowJumpDirection(listState, items, now, nowMetrics)
+                if (now == null || nowItemKey == null || nowItemKey == lastCenteredKey) return@LaunchedEffect
+                centerNowLine(listState, items, now, nowMetrics)
+                lastCenteredKey = nowItemKey
+            }
+
+            val jumpDirection by remember(items, nowMinutes, nowItemKey, nowMetrics) {
+                derivedStateOf {
+                    val now = nowMinutes
+                    if (now == null || nowItemKey == null || items.isEmpty()) {
+                        null
+                    } else {
+                        nowJumpDirection(listState, items, now, nowMetrics)
+                    }
                 }
             }
-        }
 
-        Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    end = 20.dp,
-                    top = extraPad,
-                    bottom = bottomPad,
-                ),
-            ) {
-                itemsIndexed(items, key = { index, item ->
-                    when (item) {
-                        is TimelineItem.Event -> "e-${item.event.id}"
-                        is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
-                        is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
-                    }
-                }) { index, item ->
-                    TimelineNode(
-                        isFirst = index == 0,
-                        isLast = index == items.lastIndex,
-                        item = item,
-                    ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        end = 20.dp,
+                        top = extraPad,
+                        bottom = bottomPad,
+                    ),
+                ) {
+                    itemsIndexed(items, contentType = { _, item -> item::class }, key = { index, item ->
                         when (item) {
-                            is TimelineItem.Event -> EventCard(
-                                item = item,
-                                nowMinutes = nowMinutes,
-                                onClick = { onSelectEvent(item) },
-                            )
-                            is TimelineItem.OverlapGroup -> ParallelEventCards(
-                                group = item,
-                                plan = plans.getValue(item),
-                                textMetrics = textMetrics,
-                                nowMinutes = nowMinutes,
-                                onSelectEvent = onSelectEvent,
-                            )
-                            is TimelineItem.Gap -> {
-                                val live = nowMinutes != null &&
-                                    nowMinutes in item.startMinutes until item.endMinutes
-                                GapCard(
-                                    item = item,
+                            is TimelineItem.Event -> "e-${item.event.id}"
+                            is TimelineItem.OverlapGroup -> "o-${item.events.joinToString("-") { it.event.id.toString() }}"
+                            is TimelineItem.Gap -> "g-$index-${item.startMinutes}"
+                        }
+                    }) { index, item ->
+                        TimelineNode(
+                            isFirst = index == 0,
+                            isLast = index == items.lastIndex,
+                            item = item,
+                        ) {
+                            when (item) {
+                                is TimelineItem.Event -> {
+                                    val event = item.event
+                                    val isLive = nowMinutes != null && !event.completed &&
+                                        nowMinutes in event.startMinutes until event.endMinutes
+                                    val onCardClick = remember(item, onSelectEvent) { { onSelectEvent(item) } }
+                                    EventCard(
+                                        item = item,
+                                        nowMinutes = null,
+                                        inProgress = isLive,
+                                        onClick = onCardClick,
+                                    )
+                                }
+                                is TimelineItem.OverlapGroup -> ParallelEventCards(
+                                    group = item,
+                                    plan = plans.getValue(item),
+                                    textMetrics = textMetrics,
                                     nowMinutes = nowMinutes,
-                                    modifier = if (live) {
-                                        val labelLineDp = with(density) { 16.sp.toDp() }
-                                        Modifier.heightIn(
-                                            min = NowLinePlacement.liveGapContentMinDp(
-                                                item.endMinutes - item.startMinutes,
-                                                labelLineDp.value,
-                                            ).dp,
-                                        )
-                                    } else {
-                                        Modifier
-                                    },
+                                    onSelectEvent = onSelectEvent,
                                 )
+                                is TimelineItem.Gap -> {
+                                    val live = nowMinutes != null &&
+                                        nowMinutes in item.startMinutes until item.endMinutes
+                                    GapCard(
+                                        item = item,
+                                        nowMinutes = nowMinutes,
+                                        modifier = if (live) {
+                                            val labelLineDp = with(density) { 16.sp.toDp() }
+                                            Modifier.heightIn(
+                                                min = NowLinePlacement.liveGapContentMinDp(
+                                                    item.endMinutes - item.startMinutes,
+                                                    labelLineDp.value,
+                                                ).dp,
+                                            )
+                                        } else {
+                                            Modifier
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示。
-            // 只在列表视口内绘制：item 部分滚出时插值 y 可能为负，Compose 默认不裁剪，
-            // 会盖住上方的状态条 / 统计条（Column 后绘制的子项图层更高）。
-            if (nowMinutes != null) {
-                val nowY = computeNowY(listState, items, nowMinutes, nowMetrics)
-                val viewportH = listState.layoutInfo.viewportEndOffset -
-                    listState.layoutInfo.viewportStartOffset
-                if (nowY != null && viewportH > 0 && nowY in 0f..viewportH.toFloat()) {
-                    NowLine(y = nowY, labelWidth = axisText.width)
-                }
-            }
-
-            // 当天有日程、当前时间轴滚出视野时，左下角一键跳回并居中。
-            // 非今天页 nowMinutes 为 null，此按钮不出现，避免与「返回今天」抢位。
-            val direction = jumpDirection
-            if (direction != null) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        val now = nowMinutes ?: return@ExtendedFloatingActionButton
-                        scope.launch {
-                            centerNowLine(listState, items, now, nowMetrics)
-                            lastCenteredKey = nowItemKey
+                // 整轴「现在」水平红线：仅今天页（nowMinutes != null）显示。
+                // 只在列表视口内绘制：item 部分滚出时插值 y 可能为负，Compose 默认不裁剪，
+                // 会盖住上方的状态条 / 统计条（Column 后绘制的子项图层更高）。
+                if (nowMinutes != null) {
+                    val visible by remember(listState, items, nowMinutes, nowMetrics) {
+                        derivedStateOf {
+                            val y = computeNowY(listState, items, nowMinutes, nowMetrics)
+                            val info = listState.layoutInfo
+                            val height = info.viewportEndOffset - info.viewportStartOffset
+                            y != null && height > 0 && y in 0f..height.toFloat()
                         }
-                    },
-                    icon = {
-                        Icon(
-                            imageVector = if (direction == NowJumpDirection.Up) {
-                                Icons.Default.KeyboardArrowUp
-                            } else {
-                                Icons.Default.KeyboardArrowDown
-                            },
-                            contentDescription = stringResource(R.string.cd_jump_to_now),
-                        )
-                    },
-                    text = { Text(stringResource(R.string.action_jump_to_now)) },
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(16.dp),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
+                    }
+                    if (visible) NowLine(
+                        y = { computeNowY(listState, items, nowMinutes, nowMetrics) ?: 0f },
+                        labelWidth = axisText.width,
+                    )
+                }
+
+                // 当天有日程、当前时间轴滚出视野时，左下角一键跳回并居中。
+                // 非今天页 nowMinutes 为 null，此按钮不出现，避免与「返回今天」抢位。
+                val direction = jumpDirection
+                if (direction != null) {
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            val now = nowMinutes ?: return@ExtendedFloatingActionButton
+                            scope.launch {
+                                centerNowLine(listState, items, now, nowMetrics)
+                                lastCenteredKey = nowItemKey
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = if (direction == NowJumpDirection.Up) {
+                                    Icons.Default.KeyboardArrowUp
+                                } else {
+                                    Icons.Default.KeyboardArrowDown
+                                },
+                                contentDescription = stringResource(R.string.cd_jump_to_now),
+                            )
+                        },
+                        text = { Text(stringResource(R.string.action_jump_to_now)) },
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(16.dp),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
             }
         }
     }
@@ -331,7 +380,7 @@ private suspend fun centerNowLine(
     now: Int,
     metrics: NowLineMetrics,
 ) {
-    val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return
+    val index = metrics.itemIndex ?: return
 
     listState.scrollToItem(index)
     val placed = withTimeoutOrNull(750) {
@@ -367,7 +416,7 @@ private fun nowJumpDirection(
     val nowY = computeNowY(listState, items, now, metrics)
     if (viewport > 0 && nowY != null && nowY >= 0f && nowY <= viewport) return null
 
-    val index = items.indices.firstOrNull { i -> itemCoversLiveNow(items[i], now) } ?: return null
+    val index = metrics.itemIndex ?: return null
     val direction = if (nowY != null) {
         if (nowY < 0f) NowJumpDirection.Up else NowJumpDirection.Down
     } else {
@@ -380,6 +429,7 @@ private fun nowJumpDirection(
  * 「现在」红线用到的布局度量。重叠组的列标题行高必须和 [EventLane] 里的标签一致。
  */
 private data class NowLineMetrics(
+    val itemIndex: Int?,
     val plans: Map<TimelineItem.OverlapGroup, TimelineLayoutPlan>,
     val bottomPadPx: Float,
     val labelLinePx: Float,
@@ -412,7 +462,7 @@ private fun computeNowY(
     val viewportStart = layoutInfo.viewportStartOffset
     for (info in layoutInfo.visibleItemsInfo) {
         val item = items.getOrNull(info.index) ?: continue
-        if (!itemCoversLiveNow(item, now)) continue
+        if (info.index != metrics.itemIndex) continue
         val (start, end) = itemTimeRange(item)
         val span = (end - start).coerceAtLeast(1)
         val frac = (now - start).toFloat() / span
@@ -441,11 +491,11 @@ private fun computeNowY(
  * 位置由 LazyListState 可见 item 信息插值得出，随 now / 滚动实时移动。
  */
 @Composable
-private fun NowLine(y: Float, labelWidth: Dp) {
+private fun NowLine(y: () -> Float, labelWidth: Dp) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .offset { IntOffset(0, y.toInt()) }.testTag("now-line"),
+            .offset { IntOffset(0, y().toInt()) }.testTag("now-line"),
     ) {
         // 横线：仅左侧留白（时间标签右缘 58.dp ~ 卡片左缘 90.dp），不压卡片。
         Box(
@@ -622,18 +672,16 @@ internal fun EventCard(
     // 切开后的非交叉段：只显示这一段自己的起止，不显示整场日程的完整时间。
     displayStart: Int? = null,
     displayEnd: Int? = null,
+    inProgress: Boolean = nowMinutes != null &&
+        !item.event.completed &&
+        nowMinutes in (displayStart ?: item.event.startMinutes) until (displayEnd ?: item.event.endMinutes),
 ) {
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val typography = MaterialTheme.typography
-    val regularPlan = remember(density, typography, item.event) {
-        fun height(style: androidx.compose.ui.text.TextStyle) = with(density) {
-            measurer.measure("团队 23:59", style, maxLines = 1).size.height.toDp().value
+    val regularPlan = if (narrow) LaneScale.CardContentPlan(1, 1, false) else {
+        val metrics = rememberRegularTextMetrics()
+        remember(metrics, item.event.completed, item.event.title, item.event.team) {
+            metrics.copy(time = maxOf(metrics.time, if (item.event.completed) metrics.completed + 4f else 0f))
+                .regularContentPlan(320f, item.event.title.isNotBlank() && item.event.teamDisplay.isNotBlank())
         }
-        TimelineTextMetrics(time = maxOf(24f, height(typography.labelLarge),
-            if (item.event.completed) height(typography.labelSmall) + 4f else 0f),
-            title = height(typography.titleMedium), subtitle = height(typography.bodyMedium))
-            .regularContentPlan(320f, item.event.title.isNotBlank() && item.event.teamDisplay.isNotBlank())
     }
     val event = item.event
     val shownStart = displayStart ?: event.startMinutes
@@ -644,27 +692,42 @@ internal fun EventCard(
     }
     val cardContainer = colors.accent.copy(alpha = if (dark) 0.18f else 0.12f)
 
-    val inProgress = nowMinutes != null &&
-        !event.completed &&
-        nowMinutes in shownStart until shownEnd
-    val blinkAlpha = if (inProgress) rememberBlinkAlpha() else 1f
+    val a11yType = if (event.eventType == EventType.TOKUTEN.storage) {
+        stringResource(R.string.event_type_tokuten)
+    } else {
+        stringResource(R.string.event_type_performance)
+    }
+    val a11yStatus = if (event.completed) {
+        stringResource(R.string.event_completed)
+    } else if (inProgress) {
+        stringResource(R.string.notification_short_text)
+    } else ""
+    val a11yDesc = listOfNotNull(
+        event.teamDisplay.ifBlank { event.title.ifBlank { null } },
+        a11yType,
+        "${TimeFormat.minutesToHm(shownStart)} ~ ${TimeFormat.minutesToHm(shownEnd)}",
+        event.location.takeIf { it.isNotBlank() },
+        a11yStatus.takeIf { it.isNotBlank() },
+    ).joinToString("，")
+
+    val blinkAlpha = if (inProgress) rememberBlinkAlpha() else null
     val cardAlpha = if (event.completed) 0.62f else 1f
 
     Card(
         onClick = onClick,
         modifier = modifier
             .testTag("event-card-${event.id}-$shownStart")
+            .semantics(mergeDescendants = true) {
+                contentDescription = a11yDesc
+            }
+            .animatedProgressBorder(blinkAlpha, colors.accent)
             .fillMaxWidth()
             .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier.heightIn(max = 320.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = cardContainer.copy(alpha = cardContainer.alpha * cardAlpha),
         ),
-        border = if (inProgress) {
-            BorderStroke(2.dp, colors.accent.copy(alpha = blinkAlpha))
-        } else {
-            null
-        },
+
     ) {
             Column(
                 modifier = Modifier.padding(if (narrow) 8.dp else if (compact) 10.dp else 16.dp),
@@ -802,9 +865,9 @@ private fun isEventInProgress(event: ScheduleEvent, nowMinutes: Int?): Boolean =
         nowMinutes in event.startMinutes until event.endMinutes
 
 @Composable
-private fun rememberBlinkAlpha(): Float {
+internal fun rememberBlinkAlpha(): State<Float> {
     val infinite = rememberInfiniteTransition(label = "event-border-blink")
-    val alpha by infinite.animateFloat(
+    val alpha = infinite.animateFloat(
         initialValue = 0.28f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -814,6 +877,20 @@ private fun rememberBlinkAlpha(): Float {
         label = "border-alpha",
     )
     return alpha
+}
+
+// Animation state is observed only while drawing, so text and layout stay skippable.
+internal fun Modifier.animatedProgressBorder(alpha: State<Float>?, color: Color): Modifier = drawWithCache {
+    val stroke = 2.dp.toPx()
+    val inset = stroke / 2
+    val radius = (16.dp.toPx() - inset).coerceAtLeast(0f)
+    onDrawWithContent {
+        drawContent()
+        if (alpha != null && size.width >= stroke && size.height >= stroke) {
+            drawRoundRect(color.copy(alpha = alpha.value), Offset(inset, inset),
+                Size(size.width - stroke, size.height - stroke), CornerRadius(radius), style = Stroke(stroke))
+        }
+    }
 }
 
 @Composable
@@ -831,7 +908,7 @@ private fun ParallelEventCards(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        val ordered = group.performanceEvents + group.tokutenEvents
+        val ordered = remember(group) { group.performanceEvents + group.tokutenEvents }
         plan.columns.forEach { column ->
             GroupLane(
                 label = stringResource(if (column.type == EventType.PERFORMANCE)
@@ -902,10 +979,14 @@ private fun GroupLane(
                         subtitle = item.event.title.isNotBlank() &&
                             item.event.teamDisplay.isNotBlank(),
                     )
+                    val isLive = nowMinutes != null && !item.event.completed &&
+                        nowMinutes in segment.startMinutes until segment.endMinutes
+                    val onCardClick = remember(item, onSelectEvent) { { onSelectEvent(item) } }
                     EventCard(
                         item = item,
-                        nowMinutes = nowMinutes,
-                        onClick = { onSelectEvent(item) },
+                        nowMinutes = null,
+                        inProgress = isLive,
+                        onClick = onCardClick,
                         compact = true,
                         fillHeight = true,
                         narrow = true,
@@ -917,11 +998,16 @@ private fun GroupLane(
                         modifier = segmentModifier,
                     )
                 } else {
+                    val sliceItems = remember(colIndices, items) { colIndices.map { items[it] } }
+                    val sliceInProgress = nowMinutes != null &&
+                        nowMinutes in segment.startMinutes until segment.endMinutes &&
+                        sliceItems.any { isEventInProgress(it.event, nowMinutes) }
                     OverlapSlice(
-                        items = colIndices.map { items[it] },
+                        items = sliceItems,
                         startMinutes = segment.startMinutes,
                         endMinutes = segment.endMinutes,
-                        nowMinutes = nowMinutes,
+                        nowMinutes = null,
+                        inProgress = sliceInProgress,
                         onSelectEvent = onSelectEvent,
                         timeLines = 1,
                         modifier = segmentModifier,
@@ -938,18 +1024,18 @@ private fun OverlapSlice(
     items: List<TimelineItem.Event>,
     startMinutes: Int,
     endMinutes: Int,
-    nowMinutes: Int?,
+    nowMinutes: Int? = null,
     onSelectEvent: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
     timeLines: Int = 2,
+    inProgress: Boolean = nowMinutes != null &&
+        nowMinutes in startMinutes until endMinutes &&
+        items.any { isEventInProgress(it.event, nowMinutes) },
 ) {
     val dark = LocalDarkTheme.current
-    val inProgress = nowMinutes != null &&
-        nowMinutes in startMinutes until endMinutes &&
-        items.any { isEventInProgress(it.event, nowMinutes) }
-    val blinkAlpha = if (inProgress) rememberBlinkAlpha() else 1f
+    val blinkAlpha = if (inProgress) rememberBlinkAlpha() else null
     val borderColor = if (inProgress) {
-        ProgressRed.copy(alpha = blinkAlpha)
+        ProgressRed
     } else {
         WarningAmber.copy(alpha = if (dark) 0.85f else 1f)
     }
@@ -957,10 +1043,11 @@ private fun OverlapSlice(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .animatedProgressBorder(blinkAlpha, ProgressRed)
             .clipToBounds(),
         shape = RoundedCornerShape(16.dp),
         color = WarningAmber.copy(alpha = if (dark) 0.16f else 0.12f),
-        border = BorderStroke(if (inProgress) 2.dp else 1.dp, borderColor),
+        border = if (inProgress) null else BorderStroke(1.dp, borderColor),
     ) {
         Column(
             modifier = Modifier
@@ -1002,13 +1089,11 @@ private fun OverlapSlice(
                 else -> Unit
             }
             // 块高封顶后内容可能放不下：条目区在块内滚动，保证每条都能点开。
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
+            LazyColumn(
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items.forEach { item ->
+                itemsIndexed(items) { _, item ->
                     val event = item.event
                     val colors = eventTypeColors(event).adaptTo(dark)
                     val cardAlpha = if (event.completed) 0.62f else 1f
@@ -1158,6 +1243,8 @@ internal fun EventDetailSheet(
         onDismissRequest = { if (!busy) onDismiss() },
         sheetState = sheetState,
         sheetMaxWidth = sheetMaxWidth,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() },
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Column(
@@ -1330,7 +1417,15 @@ internal fun EventDetailSheet(
                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.cd_edit_event))
                 }
                 if (onCompleteTokuten != null && !event.completed) {
-                    Button(onClick = onCompleteTokuten, enabled = !busy, modifier = Modifier.weight(1f)) {
+                    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            onCompleteTokuten()
+                        },
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                    ) {
                         Text(stringResource(R.string.action_complete_event))
                     }
                 }

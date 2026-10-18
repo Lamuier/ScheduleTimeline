@@ -9,24 +9,22 @@ import kotlinx.coroutines.launch
 
 /** 4×3 列表小组件：展示当日全部日程。 */
 class ScheduleWidgetProviderLarge : AppWidgetProvider() {
-    override fun onEnabled(context: Context) {
-        (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication).refreshNotifications()
-    }
-    override fun onDisabled(context: Context) {
-        (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication).refreshNotifications()
-    }
-    override fun onUpdate(
-        context: Context,
-        appWidgetManager: AppWidgetManager,
-        appWidgetIds: IntArray,
-    ) {
+    override fun onEnabled(context: Context) = refresh(context)
+    override fun onDisabled(context: Context) = refresh(context)
+    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) =
+        refresh(context)
+
+    private fun refresh(context: Context) {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication).notificationCoordinator.refresh()
-                ScheduleWidgetUpdater.refreshAll(context)
+            try {
+                runCatching {
+                    (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication)
+                        .refreshNotificationsAndWait(forceWidgets = true)
+                }
+            } finally {
+                pending?.finish()
             }
-            pending.finish()
         }
     }
 

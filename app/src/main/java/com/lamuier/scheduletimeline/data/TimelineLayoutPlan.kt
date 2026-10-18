@@ -35,15 +35,18 @@ data class TimelineLayoutPlan(val segments: List<LaneSegments.Segment>, val flow
     fun yFor(minute: Int): Float? = LaneFlow.yFor(flow, minute)
     companion object {
         fun build(group: TimelineItem.OverlapGroup, metrics: TimelineTextMetrics): TimelineLayoutPlan {
-            val ordered = group.performanceEvents + group.tokutenEvents
+            val performances = group.performanceEvents
+            val tokuten = group.tokutenEvents
+            val performanceCount = performances.size
+            val ordered = performances + tokuten
             val segments = LaneSegments.slice(ordered.map { it.startMinutes to it.endMinutes })
             val blocks = segments.map { segment ->
                 val indices = when (segment) {
                     is LaneSegments.Segment.Single -> listOf(segment.index)
                     is LaneSegments.Segment.Overlap -> segment.indices
                 }
-                val needs = listOf(indices.filter { it < group.performanceEvents.size },
-                    indices.filter { it >= group.performanceEvents.size }).map { lane ->
+                val needs = listOf(indices.filter { it < performanceCount },
+                    indices.filter { it >= performanceCount }).map { lane ->
                     when (lane.size) {
                         0 -> 0f
                         1 -> metrics.height(ordered[lane[0]].event.completed, false, 1, 1) + 12f
@@ -53,13 +56,13 @@ data class TimelineLayoutPlan(val segments: List<LaneSegments.Segment>, val flow
                 LaneFlow.LaneBlock(segment.startMinutes, segment.endMinutes,
                     maxOf((segment.endMinutes - segment.startMinutes) * 4f, needs.max()).coerceAtMost(320f))
             }
-            val mixed = group.performanceEvents.isNotEmpty() && group.tokutenEvents.isNotEmpty()
+            val mixed = performances.isNotEmpty() && tokuten.isNotEmpty()
             val width = if (mixed) 0.5f else 1f
             val columns = buildList {
-                if (group.performanceEvents.isNotEmpty()) add(TimelineColumnPlan(EventType.PERFORMANCE,
-                    0, group.performanceEvents.size, 0f, width))
-                if (group.tokutenEvents.isNotEmpty()) add(TimelineColumnPlan(EventType.TOKUTEN,
-                    group.performanceEvents.size, group.tokutenEvents.size, if (mixed) 0.5f else 0f, width))
+                if (performances.isNotEmpty()) add(TimelineColumnPlan(EventType.PERFORMANCE,
+                    0, performanceCount, 0f, width))
+                if (tokuten.isNotEmpty()) add(TimelineColumnPlan(EventType.TOKUTEN,
+                    performanceCount, tokuten.size, if (mixed) 0.5f else 0f, width))
             }
             return TimelineLayoutPlan(segments, LaneFlow.place(blocks, group.startMinutes, 4f, 80f), columns)
         }

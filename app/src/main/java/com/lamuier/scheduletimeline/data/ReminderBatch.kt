@@ -13,10 +13,16 @@ data class ReminderDecision(val deliver: List<ScheduledReminder>, val state: Rem
 /** Register future reminders, retain delayed work, and coalesce overdue reminders per event. */
 object ReminderPlanner {
     fun plan(events: List<ScheduleEvent>, now: Long, zone: ZoneId, previous: ReminderState): ReminderDecision {
-        val windows = NotificationSchedule.windows(events, zone)
-        val knownKeys = windows.flatMap { NotificationSchedule.remindersFor(it, zone) }.map { it.key }.toSet()
-        val futureWindows = windows.filter { it.startMillis > now }
-        val candidates = futureWindows.flatMap { NotificationSchedule.remindersFor(it, zone) }
+        return plan(NotificationSchedule.snapshot(events, now, zone), previous)
+    }
+
+    fun plan(snapshot: NotificationSnapshot, previous: ReminderState): ReminderDecision {
+        val now = snapshot.nowMillis
+        val reminders = snapshot.windows.flatMap { window ->
+            NotificationSchedule.remindersFor(window, snapshot.zone).map { window to it }
+        }
+        val knownKeys = reminders.map { it.second.key }.toSet()
+        val candidates = reminders.filter { it.first.startMillis > now }.map { it.second }
         val valid = candidates.map { it.key }.toSet()
         val pending = candidates.filter { it.key !in previous.handled &&
             (it.triggerMillis > now || it.key in previous.pending) }
@@ -38,11 +44,15 @@ object ReminderPlanner {
 object BoundarySchedule {
     fun next(events: List<ScheduleEvent>, now: Long, zone: ZoneId,
         notifications: Boolean, widgets: Boolean, intervalMs: Long = 60_000L): Long? {
+        return next(NotificationSchedule.snapshot(events, now, zone), notifications, widgets, intervalMs)
+    }
+
+    fun next(snapshot: NotificationSnapshot, notifications: Boolean, widgets: Boolean,
+        intervalMs: Long = 60_000L): Long? {
         if (!notifications && !widgets) return null
-        val eventBoundary = if (notifications) NotificationSchedule.nextRefreshAt(events, now, zone, intervalMs)
-            else NotificationSchedule.nextBoundaryAfter(events, now, zone)
-        val midnight = if (widgets) Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-            .plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() else null
+        val eventBoundary = if (notifications) snapshot.nextRefreshAt(intervalMs) else snapshot.nextBoundary
+        val midnight = if (widgets) Instant.ofEpochMilli(snapshot.nowMillis).atZone(snapshot.zone).toLocalDate()
+            .plusDays(1).atStartOfDay(snapshot.zone).toInstant().toEpochMilli() else null
         return listOfNotNull(eventBoundary, midnight).minOrNull()
     }
 }

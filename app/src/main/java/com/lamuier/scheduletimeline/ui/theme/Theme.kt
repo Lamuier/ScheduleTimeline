@@ -1,19 +1,26 @@
 package com.lamuier.scheduletimeline.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.lamuier.scheduletimeline.data.EventType
@@ -96,20 +103,46 @@ fun CategoryColors.adaptTo(dark: Boolean): CategoryColors {
     )
 }
 
+val ScheduleShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
 private val LightColors = lightColorScheme(
     primary = PurpleTime,
     onPrimary = Color.White,
     primaryContainer = Color(0xFFEDE8FF),
     onPrimaryContainer = Color(0xFF3B2B8C),
     secondary = OrangeGap,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFFEF3C7),
+    onSecondaryContainer = Color(0xFF92400E),
+    tertiary = Color(0xFF06B6D4),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFDDF6FA),
+    onTertiaryContainer = Color(0xFF0E5C6B),
     background = Color(0xFFF6F5FA),
+    onBackground = Color(0xFF1B1A21),
     surface = Color.White,
+    onSurface = Color(0xFF1B1A21),
     surfaceVariant = Color(0xFFEDECF4),
     onSurfaceVariant = Color(0xFF5F5C6B),
-    onBackground = Color(0xFF1B1A21),
-    onSurface = Color(0xFF1B1A21),
+    surfaceDim = Color(0xFFDEDDE4),
+    surfaceBright = Color(0xFFFAF9FD),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF6F5FA),
+    surfaceContainer = Color(0xFFF0EFF6),
+    surfaceContainerHigh = Color(0xFFEAE8F1),
+    surfaceContainerHighest = Color(0xFFE4E2EB),
+    outline = Color(0xFF79747E),
     outlineVariant = Color(0xFFE3E1EC),
     error = RedLocation,
+    onError = Color.White,
+    errorContainer = Color(0xFFFEE2E2),
+    onErrorContainer = Color(0xFF991B1B),
 )
 
 private val DarkColors = darkColorScheme(
@@ -118,14 +151,32 @@ private val DarkColors = darkColorScheme(
     primaryContainer = Color(0xFF3B2B8C),
     onPrimaryContainer = Color(0xFFEDE8FF),
     secondary = OrangeGap,
+    onSecondary = Color(0xFF451A03),
+    secondaryContainer = Color(0xFF451A03),
+    onSecondaryContainer = Color(0xFFFDE68A),
+    tertiary = Color(0xFF22D3EE),
+    onTertiary = Color(0xFF00363F),
+    tertiaryContainer = Color(0xFF083344),
+    onTertiaryContainer = Color(0xFFA5F3FC),
     background = Color(0xFF141318),
+    onBackground = Color(0xFFEDEAF6),
     surface = Color(0xFF1E1C24),
+    onSurface = Color(0xFFEDEAF6),
     surfaceVariant = Color(0xFF2A2833),
     onSurfaceVariant = Color(0xFFABA8B8),
-    onBackground = Color(0xFFEDEAF6),
-    onSurface = Color(0xFFEDEAF6),
+    surfaceDim = Color(0xFF141318),
+    surfaceBright = Color(0xFF3B3842),
+    surfaceContainerLowest = Color(0xFF0F0E13),
+    surfaceContainerLow = Color(0xFF1A1820),
+    surfaceContainer = Color(0xFF211F26),
+    surfaceContainerHigh = Color(0xFF2B2931),
+    surfaceContainerHighest = Color(0xFF36343C),
+    outline = Color(0xFF938F99),
     outlineVariant = Color(0xFF37343F),
     error = Color(0xFFFF7B7B),
+    onError = Color(0xFF601410),
+    errorContainer = Color(0xFF8C1D18),
+    onErrorContainer = Color(0xFFFDE8E8),
 )
 
 val LocalDarkTheme = staticCompositionLocalOf { false }
@@ -133,6 +184,7 @@ val LocalDarkTheme = staticCompositionLocalOf { false }
 @Composable
 fun ScheduleTimelineTheme(
     themeMode: ThemeMode = ThemeMode.System,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -141,7 +193,14 @@ fun ScheduleTimelineTheme(
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     }
-    val colorScheme = if (dark) DarkColors else LightColors
+    val context = LocalContext.current
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        dark -> DarkColors
+        else -> LightColors
+    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -155,6 +214,7 @@ fun ScheduleTimelineTheme(
     CompositionLocalProvider(LocalDarkTheme provides dark) {
         MaterialTheme(
             colorScheme = colorScheme,
+            shapes = ScheduleShapes,
             typography = MaterialTheme.typography.copy(
                 titleLarge = TextStyle(
                     fontFamily = FontFamily.SansSerif,

@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
@@ -20,7 +21,7 @@ class ScheduleRepository(
 
     fun observeDay(dayKey: String): Flow<List<ScheduleEvent>> = flow {
         ensureScheduleReady()
-        emitAll(eventDao.observeByDay(dayKey))
+        emitAll(eventDao.observeByDay(dayKey).distinctUntilChanged())
     }
 
     fun observeCategories(): Flow<List<Category>> = categoryDao.observeAll()
@@ -134,7 +135,7 @@ class ScheduleRepository(
 
     fun observeDayKeys(): Flow<List<String>> = flow {
         ensureScheduleReady()
-        emitAll(eventDao.observeDayKeys())
+        emitAll(eventDao.observeDayKeys().distinctUntilChanged())
     }
 
     /** 从指定日期（含当日）起第一个有日程的 dayKey；无则 null。 */
@@ -156,7 +157,7 @@ class ScheduleRepository(
             database.withTransaction {
                 val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 eventDao.reassignDayKey("default", today)
-                applyMerge(eventDao.getAll())
+                applyMerge(eventDao.getMergeCandidates())
             }
             scheduleReady = true
         }

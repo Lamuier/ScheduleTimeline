@@ -3,7 +3,7 @@ package com.lamuier.scheduletimeline
 import android.content.Intent
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.geometry.Offset
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import kotlinx.coroutines.runBlocking

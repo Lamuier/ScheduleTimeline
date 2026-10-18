@@ -43,8 +43,8 @@ sealed class TimelineItem {
 object TimelineBuilder {
     /**
      * Events sorted by start time. Free-time gaps are inserted when a previous
-     * event ends before the next begins. Gaps are split at boundaries of any
-     * overlapping events so "仍在进行" notes only cover the true overlap.
+     * event ends before the next begins. Each cluster contains all transitively
+     * overlapping events, so the interval between clusters is entirely free.
      */
     fun build(events: List<ScheduleEvent>): List<TimelineItem> {
         if (events.isEmpty()) return emptyList()
@@ -76,13 +76,14 @@ object TimelineBuilder {
         clusters.forEach { eventsInCluster ->
             val clusterStart = eventsInCluster.first().startMinutes
             if (clusterStart > previousEnd) {
-                items += gapsBetween(previousEnd, clusterStart, sorted)
+                items += TimelineItem.Gap(previousEnd, clusterStart)
             }
+            val labels = eventsInCluster.map { EventLabels.displayLabel(it) }
             val eventItems = eventsInCluster.map { event ->
                 TimelineItem.Event(
                     event = event,
                     note = event.note.takeIf { it.isNotBlank() },
-                    overlapNotes = overlapNotesFor(event, sorted),
+                    overlapNotes = overlapNotesFor(event, eventsInCluster, labels),
                 )
             }
             if (shouldShowParallel(eventsInCluster)) {
@@ -100,49 +101,18 @@ object TimelineBuilder {
         return events.size > 1
     }
 
-    private fun gapsBetween(
-        start: Int,
-        end: Int,
-        all: List<ScheduleEvent>,
-    ): List<TimelineItem.Gap> {
-        if (end <= start) return emptyList()
-
-        val points = (
-            all.flatMap { listOf(it.startMinutes, it.endMinutes) } + start + end
-            )
-            .filter { it in start..end }
-            .distinct()
-            .sorted()
-
-        return points.zipWithNext().mapNotNull { (a, b) ->
-            if (b <= a) return@mapNotNull null
-            val ongoing = all
-                .filter { it.startMinutes < b && it.endMinutes > a }
-                .map(::displayLabel)
-                .distinct()
-                .map { "${it}仍在进行" }
-            TimelineItem.Gap(
-                startMinutes = a,
-                endMinutes = b,
-                ongoingNotes = ongoing,
-            )
-        }
-    }
-
     /** 仅自动生成的时间冲突提示；用户备注走 [TimelineItem.Event.note] 单独展示。 */
     private fun overlapNotesFor(
         event: ScheduleEvent,
         all: List<ScheduleEvent>,
-    ): List<String> {
-        return all
-            .filter { it.id != event.id && overlaps(event, it) }
-            .map { "与${displayLabel(it)}重叠" }
-            .distinct()
-    }
+        labels: List<String>,
+    ): List<String> = buildSet {
+        all.forEachIndexed { index, other ->
+            if (other.id != event.id && overlaps(event, other)) add("与${labels[index]}重叠")
+        }
+    }.toList()
 
     private fun overlaps(a: ScheduleEvent, b: ScheduleEvent): Boolean {
         return a.startMinutes < b.endMinutes && b.startMinutes < a.endMinutes
     }
-
-    private fun displayLabel(event: ScheduleEvent): String = EventLabels.displayLabel(event)
 }
