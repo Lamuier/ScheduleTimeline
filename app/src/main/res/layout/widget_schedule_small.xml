@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 颜色只写在这里：桌面切换深浅色时按 values / values-night 重新解析。
+     代码里用 setTextColor(int) 写死会让文字停在旧主题，背景却已换色。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/widget_root"
@@ -21,6 +23,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:singleLine="true"
+            android:textColor="@color/widget_primary"
             android:textSize="10sp"
             android:textStyle="bold"
             tools:text="追程" />
@@ -33,6 +36,7 @@
             android:ellipsize="end"
             android:gravity="end"
             android:singleLine="true"
+            android:textColor="@color/widget_on_surface_variant"
             android:textSize="10sp"
             tools:text="2026年08月09日 周日" />
     </LinearLayout>
@@ -44,6 +48,7 @@
         android:layout_marginTop="1dp"
         android:ellipsize="end"
         android:singleLine="true"
+        android:textColor="@color/widget_on_surface"
         android:textSize="13sp"
         android:textStyle="bold"
         tools:text="今日已结束" />
@@ -54,6 +59,7 @@
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:singleLine="true"
+        android:textColor="@color/widget_on_surface_variant"
         android:textSize="11sp"
         tools:text="14:00 ~ 15:00" />
 </LinearLayout>

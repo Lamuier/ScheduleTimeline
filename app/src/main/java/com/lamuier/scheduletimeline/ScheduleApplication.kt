@@ -1,10 +1,12 @@
 package com.lamuier.scheduletimeline
 
 import android.app.Application
+import android.util.Log
 import com.lamuier.scheduletimeline.data.ScheduleDatabase
 import com.lamuier.scheduletimeline.data.NotificationPreferences
 import com.lamuier.scheduletimeline.data.ScheduleRepository
 import com.lamuier.scheduletimeline.data.ThemePreferences
+import com.lamuier.scheduletimeline.notification.REFRESH_LOG_TAG
 import com.lamuier.scheduletimeline.notification.ScheduleNotificationCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +45,7 @@ class ScheduleApplication : Application() {
     fun refreshNotifications() {
         applicationScope.launch {
             runCatching { refreshNotificationsAndWait() }
+                .onFailure { Log.w(REFRESH_LOG_TAG, "refresh failed", it) }
         }
     }
 }

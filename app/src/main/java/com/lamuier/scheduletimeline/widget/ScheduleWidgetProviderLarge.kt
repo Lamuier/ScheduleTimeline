@@ -3,9 +3,6 @@ package com.lamuier.scheduletimeline.widget
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /** 4×3 列表小组件：展示当日全部日程。 */
 class ScheduleWidgetProviderLarge : AppWidgetProvider() {
@@ -14,19 +11,7 @@ class ScheduleWidgetProviderLarge : AppWidgetProvider() {
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) =
         refresh(context)
 
-    private fun refresh(context: Context) {
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                runCatching {
-                    (context.applicationContext as com.lamuier.scheduletimeline.ScheduleApplication)
-                        .refreshNotificationsAndWait(forceWidgets = true)
-                }
-            } finally {
-                pending?.finish()
-            }
-        }
-    }
+    private fun refresh(context: Context) = ScheduleWidgetUpdater.refreshFromBroadcast(context, goAsync())
 
     companion object {
         /** 列表项 fillInIntent 携带的事件 id，点击直达对应编辑页。 */

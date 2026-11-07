@@ -4,9 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.lamuier.scheduletimeline.ScheduleApplication
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class ScheduleAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
@@ -24,17 +21,17 @@ class ScheduleAlarmReceiver : BroadcastReceiver() {
 
         val pendingResult = goAsync()
         val application = context.applicationContext as ScheduleApplication
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                when (action) {
-                    ScheduleNotificationCoordinator.ACTION_REMINDER ->
-                        application.notificationCoordinator.handleReminder(intent)
-                    ScheduleNotificationCoordinator.ACTION_COMPLETE ->
-                        application.notificationCoordinator.handleComplete(intent)
-                    else -> application.refreshNotificationsAndWait(forceWidgets = action != ScheduleNotificationCoordinator.ACTION_REFRESH)
-                }
+        BroadcastWork.launch(
+            label = "broadcast ${action.substringAfterLast('.')}",
+            finish = { pendingResult?.finish() },
+        ) {
+            when (action) {
+                ScheduleNotificationCoordinator.ACTION_REMINDER ->
+                    application.notificationCoordinator.handleReminder(intent)
+                ScheduleNotificationCoordinator.ACTION_COMPLETE ->
+                    application.notificationCoordinator.handleComplete(intent)
+                else -> application.refreshNotificationsAndWait(forceWidgets = action != ScheduleNotificationCoordinator.ACTION_REFRESH)
             }
-            pendingResult.finish()
         }
     }
 }

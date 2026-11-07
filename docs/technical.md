@@ -25,12 +25,12 @@ Debug 与 Release 均默认离线，可用 `-Online` / `--online` 下载缺失�
 | 产物 | 路径 | applicationId |
 | --- | --- | --- |
 | Debug | `app\build\outputs\apk\debug\app-debug.apk` | `com.lamuier.scheduletimeline.debug` |
-| 未归档 Release | `dist\追程-X.Y.Z_yyyyMMdd_HHmmss.apk` | `com.lamuier.scheduletimeline` |
-| 正式发布 Release | `dist\追程-X.Y.Z.apk` | `com.lamuier.scheduletimeline` |
+| 未归档 Release | `dist\ScheduleTimeline-X.Y.Z_yyyyMMdd_HHmmss.apk` | `com.lamuier.scheduletimeline` |
+| 正式发布 Release | `dist\ScheduleTimeline-X.Y.Z.apk` | `com.lamuier.scheduletimeline` |
 
 真机调试必须安装 Debug 包（`.debug` 后缀），与本机正式版并存；禁止对正式包名 `adb uninstall` 再装 Debug，以免清空用户数据。
 
-APK 文件名取 Release `app_name` 和 `versionName`。未归档包使用本次构建开始的北京时间（Asia/Shanghai），不覆盖已有同时间戳产物；正式发布包不带 `v`、`-release` 或时间戳。SHA-256、mapping 与构建报告使用对应 APK 去掉 `.apk` 后的完整前缀，同批产物共用时间戳。
+APK 文件名取 `settings.gradle.kts` 的 `rootProject.name`（`ScheduleTimeline`）和 `versionName`，只含英文字母、数字、点、下划线和连字符；中文 `app_name`「追程」只用于启动器、界面和通知，不进入任何产物文件名或 GitHub Release 附件名。未归档包使用本次构建开始的北京时间（Asia/Shanghai），不覆盖已有同时间戳产物；正式发布包不带 `v`、`-release` 或时间戳。SHA-256、mapping 与构建报告使用对应 APK 去掉 `.apk` 后的完整前缀，同批产物共用时间戳。
 
 ### Release 签名
 
@@ -155,6 +155,10 @@ ScheduleTimeline/
 
 有已放置小组件时，关闭通知仍安排事件边界和跨日刷新；两者都无需求则停止。列表以事件 ID 作为稳定 ID，不同通知、小组件及完成动作使用独立 Intent 身份。
 
-普通刷新立即执行首轮，在途请求合并至必要的后续轮次；完成动作仍逐个串行处理，广播等待处理结束。每轮统一捕获时钟、时区、权限和小组件实例，复用事件窗口；列表数据变化才通知小组件重载，系统更新与重建强制刷新。性能基准与验证范围见 [performance.md](performance.md)。
+普通刷新立即执行首轮，在途请求合并至必要的后续轮次；完成动作仍逐个串行处理。广播经 `BroadcastWork` 最多托住 7 秒（前台广播 10 秒超时，留出冷启动余量），超时只放弃等待并交还广播，刷新在后台跑完。每轮统一捕获时钟、时区、权限和小组件实例，复用事件窗口；列表数据变化才通知小组件重载，系统更新与重建强制刷新。2×1、4×3 与列表各自推送，一项失败只记日志并在下一轮重试，不影响其余两项。性能基准与验证范围见 [performance.md](performance.md)。
+
+小组件颜色全部写在布局 XML 里，引用 `values` / `values-night` 的 `widget_colors`，由桌面在套用布局时按当前深浅色解析；演出 / 特典标签各占一个 TextView，代码只切换可见性。不要在代码里用 `setTextColor(int)` 写死颜色：桌面切换深浅色时只拿已有的 RemoteViews 重新套用，写死的文字会停在旧主题，背景却已换色。
+
+刷新链路失败写入 `ScheduleRefresh`，小组件绘制或推送失败写入 `ScheduleWidget`，只记动作、组件种类和异常，不含日程内容。桌面停在旧画面时可用 `adb logcat -s ScheduleRefresh ScheduleWidget` 定位。
 
 回归验收包括 JVM 算法、Room 事务失败、SavedState 草稿恢复，以及 Robolectric/Compose 的 320 / 360 / 600dp、100% / 150% / 200% 字体与深浅主题矩阵。默认不用模拟器与真机；Windows/Linux 分支通过脚本单测，实机构建结果以实际运行平台为准。

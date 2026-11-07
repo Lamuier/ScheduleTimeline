@@ -14,7 +14,6 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
 SIGNING_KEYS = (
@@ -62,12 +61,8 @@ def app_config(root):
     settings = (root / "settings.gradle.kts").read_text(encoding="utf-8-sig")
     name = re.search(r'rootProject\.name\s*=\s*"([^"]+)"', settings)
     require(name and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", name.group(1)), "rootProject.name 须为安全的项目名")
+    # 产物文件名只用英文项目名；中文 app_name 只在界面与通知里出现，这里不读取，免得混进文件名。
     result["projectName"] = name.group(1)
-    app_name = ET.parse(root / "app/src/main/res/values/strings.xml").find("string[@name='app_name']")
-    require(app_name is not None and app_name.text, "无法读取 Release app_name")
-    result["appName"] = app_name.text
-    require(not re.search(r'[\\/:*?"<>|\x00-\x1f]', result["appName"])
-            and not result["appName"].endswith((" ", ".")), "app_name 不适合用作 APK 文件名")
     policy = read_json(root / "build-policy.json")
     require(isinstance(policy, dict) and policy.get("schemaVersion") == 1, "build-policy.json 格式无效")
     for key in ("allowedAbis", "allowedPermissions", "forbiddenDexStrings"):
@@ -377,7 +372,8 @@ def verify_apk(root, apk, tools, env, config, release, certificate):
 
 
 def artifact_base(config, started_at=None, official_release=False):
-    base = config["appName"] + "-" + config["versionName"]
+    base = config["projectName"] + "-" + config["versionName"]
+    require(re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]*", base), "产物文件名只能含英文字母、数字、点、下划线和连字符：" + base)
     if official_release:
         return base
     # 北京时间固定 UTC+8，Windows 无 tzdata 时也无需下载额外依赖。

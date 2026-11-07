@@ -85,14 +85,50 @@ class ScheduleWidgetRefreshTest {
             ScheduleWidgetUpdater.targets(app), false)
         assertEquals(9, shadow.updates); assertEquals(4, shadow.reloads)
     }
+
+    @Test fun oneKindFailingStillUpdatesTheOtherAndIsRetriedNextPass() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val shadow = Shadow.extract<RecordingWidgetManager>(AppWidgetManager.getInstance(app))
+        shadow.addBoundWidget(1, AppWidgetProviderInfo().apply {
+            provider = ComponentName(app, ScheduleWidgetProviderSmall::class.java)
+        })
+        shadow.addBoundWidget(2, AppWidgetProviderInfo().apply {
+            provider = ComponentName(app, ScheduleWidgetProviderLarge::class.java)
+        })
+        val targets = ScheduleWidgetUpdater.targets(app)
+        val events = listOf(ScheduleEvent(id = 1, team = "A", dayKey = "2026-10-15",
+            startMinutes = 600, endMinutes = 660))
+        suspend fun refresh(time: String) {
+            val snapshot = NotificationSchedule.snapshot(events, Instant.parse(time).toEpochMilli(), ZoneOffset.UTC)
+            ScheduleWidgetUpdater.refresh(app, events, snapshot, targets, force = false)
+        }
+        shadow.rejectedIds = setOf(1)
+        refresh("2026-10-15T10:01:00Z")
+        // 2×1 被拒不影响 4×3：摘要与列表照常推送
+        assertEquals(1, shadow.updates); assertEquals(1, shadow.reloads)
+        assertFalse(1 in shadow.lastViews); assertTrue(2 in shadow.lastViews)
+        shadow.rejectedIds = emptySet()
+        refresh("2026-10-15T10:01:30Z")
+        // 内容没变，但上一轮失败的 2×1 仍会重试；4×3 不重复推送
+        assertEquals(2, shadow.updates); assertEquals(1, shadow.reloads)
+        assertTrue(1 in shadow.lastViews)
+    }
 }
 
 @Implements(AppWidgetManager::class)
 class RecordingWidgetManager : ShadowAppWidgetManager() {
     var updates = 0
     var reloads = 0
+    /** 宿主拒绝这些实例的更新（抛异常），模拟单个组件画不成。 */
+    var rejectedIds: Set<Int> = emptySet()
+    /** 每个实例最近一次收到的 RemoteViews，用来模拟桌面重新套用。 */
+    val lastViews = mutableMapOf<Int, RemoteViews>()
     @Implementation
-    public override fun updateAppWidget(ids: IntArray, views: RemoteViews) { updates++ }
+    public override fun updateAppWidget(ids: IntArray, views: RemoteViews) {
+        if (ids.any { it in rejectedIds }) throw IllegalStateException("host rejected update")
+        updates++
+        ids.forEach { lastViews[it] = views }
+    }
     @Implementation
     protected fun notifyAppWidgetViewDataChanged(ids: IntArray, viewId: Int) { reloads++ }
 }

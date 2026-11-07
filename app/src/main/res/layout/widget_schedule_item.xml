@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 颜色只写在这里：桌面切换深浅色时按 values / values-night 重新解析。
+     演出 / 特典标签各占一个 TextView，代码只切换可见性，不写死颜色。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/widget_item_root"
@@ -15,20 +17,37 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:fontFamily="monospace"
+        android:textColor="@color/widget_primary"
         android:textSize="11sp"
         android:textStyle="bold"
         tools:text="14:20~14:40" />
 
     <TextView
-        android:id="@+id/widget_item_chip"
+        android:id="@+id/widget_item_chip_performance"
         android:layout_width="22dp"
         android:layout_height="22dp"
         android:layout_marginStart="6dp"
+        android:background="@drawable/widget_chip_performance"
         android:gravity="center"
         android:includeFontPadding="false"
+        android:textColor="@color/widget_chip_performance"
         android:textSize="11sp"
         android:textStyle="bold"
         tools:text="演" />
+
+    <TextView
+        android:id="@+id/widget_item_chip_tokuten"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/widget_chip_tokuten"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:textColor="@color/widget_chip_tokuten"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        tools:text="特" />
 
     <TextView
         android:id="@+id/widget_item_title"
@@ -38,6 +57,7 @@
         android:layout_weight="1"
         android:ellipsize="end"
         android:singleLine="true"
+        android:textColor="@color/widget_on_surface"
         android:textSize="13sp"
         tools:text="StarDiary" />
 </LinearLayout>

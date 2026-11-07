@@ -41,20 +41,26 @@ class BuildSupportTests(unittest.TestCase):
         self.assertGreater(config['versionCode'], 0)
         self.assertEqual(config['compileSdk'], 37)
         self.assertEqual(config['policy']['allowedAbis'], ['arm64-v8a'])
-        self.assertEqual(config['appName'], '追程')
+        self.assertEqual(config['projectName'], 'ScheduleTimeline')
+        # 中文 app_name 不进入配置，也就不可能混进产物文件名
+        self.assertNotIn('appName', config)
 
-    def test_apk_names_use_app_name_and_the_build_start_in_beijing(self):
-        config = {'appName': '追程', 'versionName': '1.2.3'}
+    def test_apk_names_use_english_project_name_and_the_build_start_in_beijing(self):
+        config = {'projectName': 'ScheduleTimeline', 'versionName': '1.2.3'}
         start = datetime(2026, 10, 13, 20, 15, 30, tzinfo=timezone.utc)
-        self.assertEqual(build.artifact_base(config, start), '追程-1.2.3_20261014_041530')
-        self.assertEqual(build.artifact_base(config, start, True), '追程-1.2.3')
+        self.assertEqual(build.artifact_base(config, start), 'ScheduleTimeline-1.2.3_20261014_041530')
+        self.assertEqual(build.artifact_base(config, start, True), 'ScheduleTimeline-1.2.3')
 
-    def test_export_preserves_full_chinese_timestamp_prefix_and_rejects_collision(self):
+    def test_apk_names_reject_non_ascii_project_name(self):
+        with self.assertRaisesRegex(build.BuildError, '产物文件名'):
+            build.artifact_base({'projectName': '追程', 'versionName': '1.2.3'}, official_release=True)
+
+    def test_export_preserves_full_timestamp_prefix_and_rejects_collision(self):
         mapping = self.root / 'app/build/outputs/mapping/release/mapping.txt'
         mapping.parent.mkdir(parents=True)
         mapping.write_text('mapping')
         apk = self.root / 'new.apk'; apk.write_bytes(b'new')
-        config = dict(appName='追程', versionName='1.2.3', versionCode=28,
+        config = dict(projectName='ScheduleTimeline', versionName='1.2.3', versionCode=28,
                       applicationId='example.app', minSdk=26, targetSdk=37)
         start = datetime(2026, 10, 13, 20, 15, 30, tzinfo=timezone.utc)
         base = build.artifact_base(config, start)
@@ -169,11 +175,12 @@ class BuildSupportTests(unittest.TestCase):
 
     def test_export_failure_keeps_previous_apk(self):
         dist = self.root / 'dist'; dist.mkdir()
-        old = dist / '追程-1.13.0.apk'
+        old = dist / 'ScheduleTimeline-1.13.0.apk'
         old.write_bytes(b'original')
         apk = self.root / 'new.apk'; apk.write_bytes(b'new')
         with self.assertRaises(build.BuildError):
-            build.export_release(self.root, apk, {}, self.cert, '追程-1.13.0', [], True, True, official_release=True)
+            build.export_release(self.root, apk, {}, self.cert, 'ScheduleTimeline-1.13.0', [], True, True,
+                                 official_release=True)
         self.assertEqual(old.read_bytes(), b'original')
 
     def test_parse_preserves_build_switches_and_rejects_conflicting_network_flags(self):

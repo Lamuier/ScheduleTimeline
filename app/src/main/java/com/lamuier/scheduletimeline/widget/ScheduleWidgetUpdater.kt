@@ -5,10 +5,12 @@ import kotlinx.coroutines.sync.withLock
 import android.net.Uri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import com.lamuier.scheduletimeline.MainActivity
@@ -19,17 +21,22 @@ import com.lamuier.scheduletimeline.data.NotificationSnapshot
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.ScheduledEventWindow
 import com.lamuier.scheduletimeline.data.TimeFormat
+import com.lamuier.scheduletimeline.notification.BroadcastWork
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
+/** 小组件绘制失败的日志标签；只记组件种类和异常，不含日程内容。 */
+internal const val WIDGET_LOG_TAG = "ScheduleWidget"
+
 /**
  * 桌面小组件数据装配。
  *
- * 复用 [NotificationSchedule] 计算进行中 / 下一项状态，保证与通知栏语义一致；
- * 颜色走 `res/values[-night]/widget_colors.xml`，由系统按夜间模式自动选择。
+ * 复用 [NotificationSchedule] 计算进行中 / 下一项状态，保证与通知栏语义一致。
+ * 颜色全部写在布局 XML 里引用 `res/values[-night]/widget_colors.xml`，由桌面在套用布局时按当前深浅色解析；
+ * 不要在这里用 `setTextColor(int)` 写死颜色，否则切换深浅色后文字停在旧主题、背景却已换色。
  */
 object ScheduleWidgetUpdater {
 
@@ -65,6 +72,12 @@ object ScheduleWidgetUpdater {
         (context.applicationContext as? ScheduleApplication)?.refreshNotificationsAndWait(forceWidgets = true)
     }
 
+    /** 组件广播：托住广播强制刷新一轮，最多等 [BroadcastWork.WAIT_BUDGET_MS] 就交还，没做完的在后台跑完。 */
+    internal fun refreshFromBroadcast(context: Context, pending: BroadcastReceiver.PendingResult?) {
+        val appContext = context.applicationContext
+        BroadcastWork.launch("widget update", finish = { pending?.finish() }) { refreshAll(appContext) }
+    }
+
     internal suspend fun refresh(context: Context, allEvents: List<ScheduleEvent>,
         snapshot: NotificationSnapshot, targets: Targets, force: Boolean) = mutex.withLock {
         val appContext = context.applicationContext
@@ -88,21 +101,39 @@ object ScheduleWidgetUpdater {
         val large = SummaryContent(list, active, next, targets.large)
         if (targets.small.isEmpty()) lastSmall = null
         else if (force || lastSmall != small) {
-            manager.updateAppWidget(targets.small.toIntArray(), buildSmall(appContext, today, events, active, next))
-            lastSmall = small
+            val pushed = push("small") {
+                manager.updateAppWidget(targets.small.toIntArray(), buildSmall(appContext, today, events, active, next))
+            }
+            if (pushed) lastSmall = small
         }
         if (targets.large.isEmpty()) { lastLarge = null; lastList = null }
         else {
             if (force || lastLarge != large) {
-                manager.updateAppWidget(targets.large.toIntArray(), buildLarge(appContext, today, events, active, next))
-                lastLarge = large
+                val pushed = push("large") {
+                    manager.updateAppWidget(targets.large.toIntArray(), buildLarge(appContext, today, events, active, next))
+                }
+                if (pushed) lastLarge = large
             }
             val dataset = list to targets.large
             if (force || lastList != dataset) {
-                manager.notifyAppWidgetViewDataChanged(targets.large.toIntArray(), R.id.widget_list)
-                lastList = dataset
+                val pushed = push("list") {
+                    manager.notifyAppWidgetViewDataChanged(targets.large.toIntArray(), R.id.widget_list)
+                }
+                if (pushed) lastList = dataset
             }
         }
+    }
+
+    /**
+     * 一种组件画不成或被宿主拒绝，只记日志，不连累另一种组件。
+     * 失败时不更新上一轮缓存，下一轮即使内容没变也会重试。
+     */
+    private inline fun push(part: String, block: () -> Unit): Boolean = try {
+        block()
+        true
+    } catch (error: Exception) {
+        Log.w(WIDGET_LOG_TAG, "$part widget update failed", error)
+        false
     }
 
     private fun openAppIntent(context: Context): PendingIntent {
@@ -241,18 +272,7 @@ object ScheduleWidgetUpdater {
             R.id.widget_small_subtitle,
             if (subText.isEmpty()) View.GONE else View.VISIBLE,
         )
-
-        views.setTextColor(R.id.widget_small_status, context.getColor(R.color.widget_primary))
-        views.setTextColor(
-            R.id.widget_small_date,
-            context.getColor(R.color.widget_on_surface_variant),
-        )
-        views.setTextColor(R.id.widget_small_title, context.getColor(R.color.widget_on_surface))
-        views.setTextColor(
-            R.id.widget_small_subtitle,
-            context.getColor(R.color.widget_on_surface_variant),
-        )
-        // 背景已在 XML 中用 @drawable/widget_background 设置圆角
+        // 文字颜色与圆角背景都在 widget_schedule_small.xml 里，随桌面深浅色解析
 
         // 有主事件（进行中/下一项）时点击直达该事件编辑页，否则仅打开应用
         val primaryEventId = when {
@@ -299,21 +319,12 @@ object ScheduleWidgetUpdater {
             context.getString(R.string.widget_date_with_weekday, dateText, weekday),
         )
         views.setTextViewText(R.id.widget_large_summary, summaryText)
-
-        views.setTextColor(R.id.widget_large_title, context.getColor(R.color.widget_primary))
-        views.setTextColor(R.id.widget_large_date, context.getColor(R.color.widget_on_surface))
-        views.setTextColor(
-            R.id.widget_large_summary,
-            context.getColor(R.color.widget_on_surface_variant),
-        )
-
-        // 根布局与列表卡片背景已在 XML 中设置圆角 drawable
+        // 文字颜色、根布局与列表卡片背景都在 widget_schedule_large.xml 里，随桌面深浅色解析
 
         val empty = events.isEmpty()
         views.setViewVisibility(R.id.widget_list, if (empty) View.GONE else View.VISIBLE)
         views.setViewVisibility(R.id.widget_empty, if (empty) View.VISIBLE else View.GONE)
         views.setTextViewText(R.id.widget_empty, context.getString(R.string.widget_empty_today_hint))
-        views.setTextColor(R.id.widget_empty, context.getColor(R.color.widget_on_surface_variant))
 
         // RemoteViewsService 提供列表数据
         val listIntent = Intent(context, ScheduleWidgetService::class.java)
