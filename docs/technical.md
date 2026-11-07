@@ -159,6 +159,8 @@ ScheduleTimeline/
 
 小组件颜色全部写在布局 XML 里，引用 `values` / `values-night` 的 `widget_colors`，由桌面在套用布局时按当前深浅色解析；演出 / 特典标签各占一个 TextView，代码只切换可见性。不要在代码里用 `setTextColor(int)` 写死颜色：桌面切换深浅色时只拿已有的 RemoteViews 重新套用，写死的文字会停在旧主题，背景却已换色。
 
+选择器预览：`widget_schedule_*_preview.xml` 是示例数据布局，Android 12+ 桌面经 `previewLayout` 直接渲染；HyperOS 等只认静态 `previewImage`，所以同一布局由 `WidgetPreviewImageTest` 画成 `drawable-nodpi` / `drawable-night-nodpi` 下的 `widget_preview_small|large.png`。改了预览布局或配色后，设环境变量 `WIDGET_PREVIEW_OUT` 为 `app/src/main/res` 的绝对路径，单跑该测试重新生成；平时该测试只校验能画出内容。
+
 刷新链路失败写入 `ScheduleRefresh`，小组件绘制或推送失败写入 `ScheduleWidget`，只记动作、组件种类和异常，不含日程内容。桌面停在旧画面时可用 `adb logcat -s ScheduleRefresh ScheduleWidget` 定位。
 
 回归验收包括 JVM 算法、Room 事务失败、SavedState 草稿恢复，以及 Robolectric/Compose 的 320 / 360 / 600dp、100% / 150% / 200% 字体与深浅主题矩阵。默认不用模拟器与真机；Windows/Linux 分支通过脚本单测，实机构建结果以实际运行平台为准。

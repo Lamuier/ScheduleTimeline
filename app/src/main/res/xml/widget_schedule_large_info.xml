@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:minWidth="250dp"
     android:minHeight="180dp"
     android:targetCellWidth="4"
@@ -13,4 +14,6 @@
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:description="@string/widget_large_description"
-    android:previewImage="@mipmap/ic_launcher" />
+    android:previewImage="@drawable/widget_preview_large"
+    android:previewLayout="@layout/widget_schedule_large_preview"
+    tools:targetApi="31" />

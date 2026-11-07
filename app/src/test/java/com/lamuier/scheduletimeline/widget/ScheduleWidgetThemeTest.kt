@@ -19,6 +19,7 @@ import java.time.ZoneOffset
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -91,6 +92,25 @@ class ScheduleWidgetThemeTest {
             startMinutes = 700, endMinutes = 720, eventType = EventType.TOKUTEN.storage,
             tokutenKind = TokutenKind.FINAL.storage)).reapply(app, root)
         assertChips(root, visible = R.id.widget_item_chip_tokuten, gone = R.id.widget_item_chip_performance, mark = "特")
+    }
+
+    @Test fun pickerPreviewsInflateAsRemoteViewsAndFollowNightMode() {
+        // 选择器按 RemoteViews 规则套用 previewLayout，不受支持的 View 会让预览整块空白
+        val previews = listOf(R.layout.widget_schedule_small_preview, R.layout.widget_schedule_large_preview)
+        forEachTheme {
+            previews.forEach { layout ->
+                val root = RemoteViews(app.packageName, layout).apply(app, FrameLayout(app))
+                val texts = root.allTextViews()
+                assertTrue(texts.isNotEmpty())
+                assertTrue(texts.any { it.currentTextColor == app.getColor(R.color.widget_on_surface) })
+            }
+        }
+    }
+
+    private fun View.allTextViews(): List<TextView> = when (this) {
+        is TextView -> listOf(this)
+        is android.view.ViewGroup -> (0 until childCount).flatMap { getChildAt(it).allTextViews() }
+        else -> emptyList()
     }
 
     /** 先浅色后深色各跑一遍；并确认两套颜色确实不同，避免切换没生效时测试空过。 */

@@ -175,6 +175,17 @@
     <string name="widget_upcoming_later">%1$s %2$s 开始</string>
     <string name="widget_small_description">查看当前进行中或下一项日程</string>
     <string name="widget_large_description">展示今日全部日程</string>
+    <!-- 小组件选择器里的预览：固定示例数据，不读取真实日程 -->
+    <string name="widget_preview_date">今天</string>
+    <string name="widget_preview_team_a">示例团队 A</string>
+    <string name="widget_preview_team_b">示例团队 B</string>
+    <string name="widget_preview_team_c">示例团队 C</string>
+    <string name="widget_preview_mark_performance">演</string>
+    <string name="widget_preview_mark_tokuten">特</string>
+    <string name="widget_preview_time_start" translatable="false">14:00</string>
+    <string name="widget_preview_time_range" translatable="false">14:00~15:00</string>
+    <string name="widget_preview_time_range_2" translatable="false">15:10~15:40</string>
+    <string name="widget_preview_time_range_3" translatable="false">18:30~20:00</string>
 
     <!-- 长按桌面图标的 App Shortcuts -->
     <string name="shortcut_add_short">新增日程</string>
