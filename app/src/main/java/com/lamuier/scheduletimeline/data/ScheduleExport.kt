@@ -93,7 +93,7 @@ object ScheduleExport {
      * - 已发布的 10 列格式仍可导入；旧「关联演出开始时间」列（时钟值）会被忽略；
      *   新第 10 列「完成」写「是」时仅特典记为已完成。
      * - 首行若为表头（日期列=「日期」）则跳过。
-     * - AI 输出常带说明文字或 ```csv 围栏：原样解析失败时会剥围栏、再从「日期」表头行重试。
+     * - AI 输出常带说明文字或 ```csv 围栏：记录间的代码块围栏行与单列说明行会被跳过，引号内的多行围栏文本按原样保留。
      * 解析为引号感知（RFC 4180）：带引号字段中的逗号 / 引号 / 换行不破坏列结构。
      */
     fun parseImportDrafts(text: String, fallbackDayKey: String = "default"): List<ImportDraft> =
@@ -136,7 +136,8 @@ object ScheduleExport {
      * - 引号段内 `""` 表示字面引号；段内换行属于同一条记录。
      * - 字段解析后 trim；仅含一个空字段的空白行跳过。
      */
-    private fun parseCsvRecords(text: String): List<CsvRecord> {
+    private fun parseCsvRecords(rawText: String): List<CsvRecord> {
+        val text = rawText.trimStart('\uFEFF')
         val records = mutableListOf<CsvRecord>()
         var line = 1
         var recordLine = 1

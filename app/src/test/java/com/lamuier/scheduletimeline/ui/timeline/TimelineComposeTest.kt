@@ -57,7 +57,7 @@ class TimelineComposeTest(private val width: Int, private val font: Float, priva
 
     @Test fun oneMinuteSliceKeepsAtLeastOneTimeAndTeamLine() {
         val events = listOf(event, event.copy(id = 2, team = "团队 Beta", eventType = EventType.TOKUTEN.storage, completed = true))
-        content { TimelineList(TimelineBuilder.build(events), events, onSelectEvent = {}) }
+        content { TimelineList(TimelineBuilder.build(events), onSelectEvent = {}) }
         compose.onNodeWithText("团队 Alpha", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("团队 Beta", useUnmergedTree = true).assertIsDisplayed()
         compose.onAllNodesWithText("10:00 ~ 10:01", useUnmergedTree = true).assertCountEquals(2)
@@ -76,7 +76,7 @@ class TimelineComposeTest(private val width: Int, private val font: Float, priva
     @Test fun nowLineUsesTheSameMeasuredSliceAnchorAsCards() {
         val events = listOf(event.copy(endMinutes = 602), event.copy(id = 2, team = "Beta",
             startMinutes = 601, endMinutes = 603, eventType = EventType.TOKUTEN.storage))
-        content { TimelineList(TimelineBuilder.build(events), events, nowMinutes = 601, onSelectEvent = {}) }
+        content { TimelineList(TimelineBuilder.build(events), nowMinutes = 601, onSelectEvent = {}) }
         val card = compose.onNodeWithTag("event-card-1-601").fetchSemanticsNode().boundsInRoot
         val line = compose.onNodeWithTag("now-line").fetchSemanticsNode().boundsInRoot
         assertEquals(card.top, line.top, 2f)

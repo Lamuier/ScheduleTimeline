@@ -6,3 +6,6 @@
 
 # SavedStateHandle serializes the edit session across process recreation.
 -keep class com.lamuier.scheduletimeline.ui.edit.EditUiState { *; }
+-keep class com.lamuier.scheduletimeline.ui.edit.EditValidationError { *; }
+-keep class com.lamuier.scheduletimeline.data.EventType { *; }
+-keep class com.lamuier.scheduletimeline.data.TokutenKind { *; }

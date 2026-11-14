@@ -62,11 +62,13 @@ object EventLabels {
         return "${typeMark(event)}·$team"
     }
 
-    fun eventTypeStorageFromCsv(label: String): EventType = when (label.trim()) {
-        "特典" -> EventType.TOKUTEN
-        "演出" -> EventType.PERFORMANCE
-        "舞台演出" -> EventType.PERFORMANCE
-        else -> if (label.contains("特典")) EventType.TOKUTEN else EventType.PERFORMANCE
+    fun eventTypeStorageFromCsv(label: String): EventType {
+        val normalized = label.trim().uppercase()
+        return when (normalized) {
+            "特典", "TOKUTEN" -> EventType.TOKUTEN
+            "演出", "舞台演出", "PERFORMANCE" -> EventType.PERFORMANCE
+            else -> if (normalized.contains("特典")) EventType.TOKUTEN else EventType.PERFORMANCE
+        }
     }
 
     fun tokutenKindStorageFromCsv(label: String): String = when (label.trim()) {

@@ -29,11 +29,11 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
 
 ### 2.1 Android 16 通用规则
 
-- 工程 `compileSdk 36.1`。所有 Android 16 版本（API 36.0 与 36.1+）都会请求 promoted ongoing：
+- 工程 `compileSdk 37`。所有 Android 16 版本（API 36.0 与 36.1+）都会请求 promoted ongoing：
   - **API 36.1+**：调用公开 `setRequestPromotedOngoing(true)`。
   - **API 36.0（如 HyperOS 3）**：该公开方法尚不存在，改为直接写入 `android.requestPromotedOngoing=true` extra（与 NotificationCompat 做法一致，已在 Xiaomi 17 / HyperOS 3.0 真机验证可获得 `PROMOTED_ONGOING`）。
   - **任何情况下都不再请求 colorized**。只有系统实际授予 promoted ongoing 标志时，才会出现 Status Chip。
-- **Status Chip 内容按状态设置**：进行中日程 `setShortCriticalText("进行中")`。未来日程距开始 2 小时内不设短文本，由系统按 `setWhen()` 显示实时倒计时；超过 2 小时系统会回退显示完整标题导致胶囊溢出（HyperOS 3 实测），此时改设紧凑短文本——当天「12:20 开场/开始」、跨天「周六 12:20」。短文本优先级高于时间；最终样式与是否展示仍由系统决定。
+- **Status Chip 内容按状态设置**：单项进行中日程 `setShortCriticalText(...)` 设为「类型字·团队名」（如 `演·空色轨迹`，最多 8 个字符）；多项并行或空值回退为「进行中」。未来日程距开始 2 小时内不设短文本，由系统按 `setWhen()` 显示实时倒计时；超过 2 小时系统会回退显示完整标题导致胶囊溢出（HyperOS 3 实测），此时改设紧凑短文本——当天「12:20 开场/开始」、跨天「周六 12:20」。短文本优先级高于时间；最终样式与是否展示仍由系统决定。
 - **API 36.1+ 非通话通知提升资格**：须满足主动请求提升、`ongoing`、有标题、非分组摘要、无自定义 `RemoteViews`、允许的通知样式且未请求 colorized；资格成立也不保证系统一定显示 Status Chip，用户或通知渠道设置仍优先。
 - **API 26–35（Android 8–15）**：回退为普通持续通知，仍保留倒计时、进度条和开始/结束边界刷新。
 - **API 13+**：首次开启总通知时请求 `POST_NOTIFICATIONS`；拒绝权限不会伪造通知状态。
@@ -49,14 +49,13 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
   | 设备厂商 | `Xiaomi`、`Redmi` 或 `POCO` |
   | 岛功能属性 | 系统属性 `persist.sys.feature.island = true` |
   | 协议版本 | `Settings.System` 的 `notification_focus_protocol` 不是已知的 OS1/OS2（读不到时按 OS3 候选处理）；内容提供器不可读时仍继续发送普通通知协议 |
-  | Focus 通知查询 | `content://miui.statusbar.notification.public` 的 `canShowFocus`，**仅作诊断，不是硬门槛**（见第七节：真机已证伪其为上岛必要条件） |
 
-  协议值读不到时按 OS3 候选处理；不申请白名单、不接入 MiPush。
+  注：`content://miui.statusbar.notification.public` 的 `canShowFocus` **不作为启用门槛**（见第七节：真机已证伪其为上岛必要条件）；协议值读不到时按 OS3 候选处理；不申请白名单、不接入 MiPush。
 
 - **上岛机制**：OS3 使用普通 Android 通知作承载，应用在同一 `LIVE_NOTIFICATION_ID`（`4101`）上更新 `miui.focus.param`（标准 `param_v2`）和 `miui.focus.pics`。JSON 使用 HyperIsland-ToolKit 同款 `protocol=3` 与 `updatable=true`，边界刷新不会产生重复通知。该 payload 作为旧版 OS3 表面的兼容保留，但**上岛的关键是 promoted ongoing 请求**（见核心结论）。
-- **胶囊/岛渲染**：HyperOS 3 常驻岛表面实际是 Android Status Chip（`shortCriticalText` + `setWhen()` 计时）；进行中短文案写「团队名+单字类型」（如 `Star演`），不再写死「进行中」。MIUI 大岛对齐 ToolKit `setBigIslandInfo` 左右图文：A 区图标 + 团队名，B 区 `imageTextInfoRight` 类型 +「后开场/已开场」——**仍不挂 digit 计时组件**（会压缩 A 区丢左文字）。`enableFloat=true` 且 `islandFirstFloat=true`（ToolKit 默认）首次自动展开，否则 `airtimeCount` 会一直为 0、用户永远看不到大岛文字。小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。
+- **胶囊/岛渲染**：HyperOS 3 常驻岛表面实际是 Android Status Chip（`shortCriticalText` + `setWhen()` 计时）；单项进行中短文案写「类型字·团队名」（如 `演·空色轨迹`，最多 8 个字符），多项并行或空值回退为「进行中」。MIUI 大岛对齐 ToolKit `setBigIslandInfo` 左右图文：单项时 A 区图标 +「类型字·团队名」，B 区 `imageTextInfoRight` 仅保留状态文案「后开场 / 已开场」（不再在右区重复类型字）；多项并行时 A 区图标 +「N 项日程」，B 区「进行中 / 后开场或已开场」——**仍不挂 digit 计时组件**（会压缩 A 区丢左文字）。`enableFloat=true` 且 `islandFirstFloat=true`（ToolKit 默认）首次自动展开，否则 `airtimeCount` 会一直为 0、用户永远看不到大岛文字。小岛使用 256px 彩色图标（`drawable-nodpi/ic_island.png`）。
 - **最终呈现由系统决定**：HyperOS SystemUI 决定尺寸、动画、是否显示在顶部状态栏及用户权限；应用不伪造 HyperIsland 状态。关闭通知、无可发布权限或无下一项时，取消同一通知 ID。
-- **实现约束**：直接生成标准模板 payload，不依赖 Kotlin 2.2 编译的第三方二进制，保持工程 Kotlin 2.0.21 基线；不使用自定义 `RemoteViews`，也不设置 Xiaomi `timeout` 字段以避免分钟/秒单位差异。
+- **实现约束**：工程已升级至 Kotlin 2.3.10，仍直接生成标准模板 payload（零三方 HyperIsland SDK 依赖）；不使用自定义 `RemoteViews`，也不设置 Xiaomi `timeout` 字段以避免分钟/秒单位差异。
 
 ---
 
@@ -66,9 +65,9 @@ ScheduleTimeline 的 Live Updates 使用本地 Room 日程数据，**不访问�
 
 | 日程状态 | HyperIsland 内容 |
 |---|---|
-| 未来待办 | `baseInfo` 显示“下一项”标题、团队/类型、具体日期和开始时间；大岛左团队名、右「类型 / 后开场」；远未来 Status Chip 用紧凑短文案 |
-| 单项进行中 | `baseInfo` 显示当前团队和结束时间；大岛左团队名、右「类型 / 已开场」；Status Chip `shortCriticalText` = 团队名+类型 |
-| 多项并行中 | Android 通知正文显示全部活动，HyperIsland 展示当前通知标题和合并计时窗口 |
+| 未来待办 | `baseInfo` 显示“下一项”标题（类型字·团队名）、具体日期和开始时间；大岛左「类型字·团队名」、右「后开场」；远未来 Status Chip 用紧凑短文案 |
+| 单项进行中 | `baseInfo` 显示当前日程（类型字·团队名）和结束时间；大岛左「类型字·团队名」、右「已开场」；Status Chip `shortCriticalText` = 类型字·团队名（最多 8 字符） |
+| 多项并行中 | Android 通知正文显示全部活动，大岛左「N 项日程」、右「进行中 / 已开场」，Status Chip `shortCriticalText` = `进行中` |
 | 无下一项 / 通知关闭 | 取消 `4101`，不留下 HyperIsland extras |
 
 标准 payload 资源：
@@ -92,15 +91,15 @@ miui.focus.pics   -> miui.focus.pic_schedule        # 注：pic_ticker 已在调
 | protocol | 3（ParamV2 默认值，会序列化） | 3 | ✅ |
 | updatable | true（默认值，会序列化） | true | ✅ |
 | business / ticker | 构造参数 | `schedule_timeline` / title | ✅ |
-| enableFloat / islandFirstFloat | demo 默认 true/true（builder 字段） | 测试通知 true/false，live 通知 true/false | ✅ 参数化合理 |
+| enableFloat / islandFirstFloat | demo 默认 true/true（builder 字段） | true / true（首次自动展开） | ✅ |
 | baseInfo | type/title/subTitle/content/picFunction | 同款 | ✅ |
 | picInfo | type/pic（loop/autoplay/number 可选） | 1/ref（移除未引用的可选字段） | ✅ |
 | param_island | islandProperty/islandPriority/islandOrder/dismissIsland/maxSize/needCloseAnimation | 全对齐 | ✅ |
-| imageTextInfoLeft | type/picInfo/textInfo(title[/content]) | 左区图标 + 团队名 title | ✅ |
-| imageTextInfoRight | type=2 + textInfo | 右区类型 title + 开场说明 content（非 digit） | ✅ 对齐 ToolKit 左右图文 demo |
+| imageTextInfoLeft | type/picInfo/textInfo(title[/content]) | 左区图标 + 类型字·团队名（多项为「N 项日程」） | ✅ |
+| imageTextInfoRight | type=2 + textInfo | 右区状态文案「后开场 / 已开场」（多项补充「进行中」标题，非 digit） | ✅ 对齐 ToolKit 左右图文 demo |
 | 右侧 digit 计时 | 无 | 已移除（实测会压缩 A 区丢左文字） | ✅ 规避 issue #2 |
 | islandFirstFloat | demo 默认 true | true（首次自动展开） | ✅ |
-| Status Chip 短文案 | — | 进行中 = 团队名+类型 | ✅ 常驻表面可见身份 |
+| Status Chip 短文案 | — | 单项进行中 = 类型字·团队名（≤8 字符），多项 = 进行中 | ✅ 常驻表面可见身份 |
 | 已删除字段 | notifyId/orderId/tickerPic 在模型中可选，`sequence` 不存在 | 已全部删除 | ✅ 安全 |
 
 payload 结构与字段值均无出入，可排除 JSON 解析失败的假设。
@@ -118,7 +117,7 @@ payload 结构与字段值均无出入，可排除 JSON 解析失败的假设。
 | 开始前 1 小时 | 开始时刻减 1 小时 | 「1 小时后（HH:mm）开始」 |
 
 - 提醒为普通通知：非常驻、不请求 promoted ongoing、不注入超级岛 payload，`setAutoCancel(true)` 且 `setTimeoutAfter(5 分钟)` 自动消失；通知 ID 按「事件 id × 提醒类型」派生。
-- 任意时刻只挂最近一个触发点的 `AlarmManager` 闹钟（`setAndAllowWhileIdle`，携带 eventId 与提醒类型）；触发时按 eventId 读最新数据发通知（事件已删除则跳过），随后 `refresh()` 推进到下一触发点。保存/删除/导入/清空/开机后都重算。
+- 任意时刻只挂最近一个触发点的 `AlarmManager` 闹钟（有精确闹钟权限时用 `setExactAndAllowWhileIdle`，否则回退 `setAndAllowWhileIdle`，动作 `ACTION_REMINDER`）；实际待触发状态持久化在 `ReminderStore` 中，闹钟触发后由 `handleReminder()` 调用 `refresh()` 重新核对数据库，补发到点且未删除/未改期/未完成的提醒，并推进到下一触发点。保存/删除/导入/清空/开机/时区或时间变更后都重算。
 - 已错过的触发点静默跳过不补发（如临开场 30 分钟才录入的事件不会收到 3 天前与 0 点提醒）；触发时刻按 `ZonedDateTime` 偏移计算，与本地墙钟对齐。
 - **特典完成**：详情页「完成日程」或 Live Update 通知动作会把该特典标为已完成。完成后不再进入常驻通知、进度刷新与关键时间点提醒（已弹出的提醒一并取消）；演出无此按钮。
 
@@ -144,7 +143,7 @@ payload 结构与字段值均无出入，可排除 JSON 解析失败的假设。
 | --- | --- | --- | --- | --- |
 | **P0** | 通知渠道 importance | 我们 `IMPORTANCE_DEFAULT`；ToolKit / livebridge 均 `IMPORTANCE_HIGH` | 超级岛依附高优先级渠道；DEFAULT 大概率被忽略岛 extras，且渠道创建后 importance 被系统锁定 | ✅ **已实施**：升级 HIGH 并换新渠道 ID `schedule_live_updates_v2`（旧 `schedule_live_updates` 已删除） |
 | **P0** | `canShowFocus` 焦点通知授权是否作硬门槛 | 我们放宽不作为硬门槛；ToolKit `isSupported()` 把它当硬门槛 | 假设授权为 false 时 MIUI 静默丢弃 payload | ❌ **真机证伪**：Xiaomi 17 上 livebridge `focusType=null` 仅靠 promoted ongoing 上岛；本设备授权不影响上岛，保留为诊断信息不门槛 |
-| **P1** | 前台/后台测试姿势 | 前台点测试按钮（已移除）；岛依赖 `islandFirstFloat=true` | 已对齐，非瓶颈；live 通知（false/false）需退后台才可能展岛 | 验证姿势说明见下 |
+| **P1** | 前台/后台与自动展开（`enableFloat` / `islandFirstFloat`） | 前台点测试按钮（已移除）；早期 live 通知曾用 `false/false`，ToolKit 默认 `true/true` | 若不设 `true/true` 则需退后台且常驻不自动展大岛（`airtimeCount=0`） | ✅ **已实施**：live 通知已统一为 `enableFloat=true`、`islandFirstFloat=true`（见 2.2 节，验证命令见第八节） |
 | **P2** | `pics` 多塞未引用的 `miui.focus.pic_ticker` | 有但 param 未引用 | 多余资源，理论无害 | ✅ **已实施**：清理未引用 pic_ticker |
 
 **核心推理（调查时）**：两家参考项目的唯一共同硬配置是 `IMPORTANCE_HIGH` 渠道 + `canShowFocus` 硬门槛；我们恰好都不同（DEFAULT 渠道 + 放宽授权），payload 已对齐到字段级。后被真机验证修正为：真正必要的只有 **promoted ongoing 请求**，焦点授权与私有 payload 均非必要。
@@ -167,7 +166,7 @@ payload 结构与字段值均无出入，可排除 JSON 解析失败的假设。
 | 项 | ToolKit demo | livebridge | 追程 |
 | --- | --- | --- | --- |
 | Builder | NotificationCompat | NotificationCompat | 框架 `Notification.Builder` |
-| smallIcon | ✅ | ✅ | ✅ `ic_launcher_monochrome` |
+| smallIcon | ✅ | ✅ | ✅ `ic_notification` |
 | setOngoing | ❌ 未设 | ✅ true | ✅ true |
 | setAutoCancel | 默认 | false | 默认 |
 | setOnlyAlertOnce | ❌ | ✅ true | ✅ true |
@@ -252,6 +251,6 @@ adb shell settings get secure focus_notifs
 | 渠道创建 / importance / 换 ID | `notification/ScheduleNotificationCoordinator.kt`（ensureChannel） |
 | Builder 配置 / promoted ongoing 注入 | `ScheduleNotificationCoordinator.kt` |
 | HyperIsland extras 组装 | `XiaomiHyperIslandAdapter.kt`（buildResourceBundle / buildJsonParam） |
-| 设备能力检测（含 Focus 查询非门槛） | `XiaomiHyperIslandCapability.kt` |
+| 设备能力检测 | `XiaomiHyperIslandCapability.kt` |
 | 边界/提醒闹钟调度 | `notification/*`（NotificationSchedule 相关） |
 | 三方参考 | `C:\Users\lamuier\Code\HyperIsland-ToolKit`、`C:\Users\lamuier\Code\livebridge` |

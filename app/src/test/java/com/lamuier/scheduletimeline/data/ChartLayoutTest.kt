@@ -2,38 +2,9 @@ package com.lamuier.scheduletimeline.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChartLayoutTest {
-
-    @Test
-    fun position_assignsSeparateColumnsForOverlappingEvents() {
-        val events = listOf(
-            TimelineItem.Event(event(1, start = 600, end = 700)),
-            TimelineItem.Event(event(2, start = 650, end = 750)),
-        )
-
-        val positioned = ChartLayout.position(events)
-
-        assertEquals(2, positioned.size)
-        assertEquals(2, positioned.first().columns)
-        assertTrue(positioned.map { it.column }.toSet().size == 2)
-    }
-
-    @Test
-    fun freeSlots_returnsGapBetweenBusyIntervals() {
-        val events = listOf(
-            event(1, start = 600, end = 660),
-            event(2, start = 720, end = 780),
-        )
-
-        val slots = ChartLayout.freeSlots(events)
-
-        assertEquals(1, slots.size)
-        assertEquals(660, slots[0].startMinutes)
-        assertEquals(720, slots[0].endMinutes)
-    }
 
     @Test
     fun stats_countsBusyFreeAndConflicts() {

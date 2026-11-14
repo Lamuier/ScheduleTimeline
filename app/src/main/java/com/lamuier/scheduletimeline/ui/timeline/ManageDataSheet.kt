@@ -57,6 +57,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -71,6 +72,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
@@ -128,13 +130,26 @@ fun ManageDataSheet(
     val notificationsEnabled by viewModel.notificationsEnabled.collectAsStateWithLifecycle()
     val liveUpdatesAlwaysOn by viewModel.liveUpdatesAlwaysOn.collectAsStateWithLifecycle()
 
-    val busyNow by rememberUpdatedState(writeState.busy)
+    var clearedStaleError by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!clearedStaleError) {
+            clearedStaleError = true
+            viewModel.clearWriteError()
+        }
+    }
+
+    var exporting by remember { mutableStateOf(false) }
+    val sheetBusy = writeState.busy || exporting
+    val busyNow by rememberUpdatedState(sheetBusy)
     ModalBottomSheet(
-        onDismissRequest = { if (!writeState.busy) onDismiss() },
+        onDismissRequest = { if (!sheetBusy) onDismiss() },
         sheetGesturesEnabled = false,
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = !busyNow,
+        ),
         sheetState = rememberModalBottomSheetState(
             skipPartiallyExpanded = true,
-            confirmValueChange = { it != androidx.compose.material3.SheetValue.Hidden || !busyNow },
+            confirmValueChange = { it != SheetValue.Hidden || !busyNow },
             // 禁止下拉关闭：拖拽手势与导入页页内滚动（识别结果 / 输入框）冲突，
             // 关闭只保留点击遮罩与系统返回
 
@@ -142,7 +157,7 @@ fun ManageDataSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() },
     ) {
-        if (writeState.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (sheetBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         if (writeState.failed) Text(stringResource(R.string.operation_failed),
             color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
         AnimatedContent(
@@ -167,6 +182,7 @@ fun ManageDataSheet(
                     onDynamicColorChange = viewModel::setDynamicColor,
                     notificationsEnabled = notificationsEnabled,
                     liveUpdatesAlwaysOn = liveUpdatesAlwaysOn,
+                    busy = sheetBusy,
                     onNotificationsEnabledChange = { enabled ->
                         if (enabled) {
                             onRequestNotificationPermission(false)
@@ -181,33 +197,57 @@ fun ManageDataSheet(
                             viewModel.setLiveUpdatesAlwaysOn(false)
                         }
                     },
-                    onImport = { currentStep = ManageStep.Import },
+                    onImport = {
+                        if (!sheetBusy) {
+                            viewModel.clearWriteError()
+                            currentStep = ManageStep.Import
+                        }
+                    },
                     onExport = {
-                        scope.launch {
-                            val csv = viewModel.exportCurrentDayCsv()
-                            if (csv.isBlank()) {
-                                Toast.makeText(
-                                    context,
-                                    exportEmptyMessage,
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            } else {
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, csv)
+                        if (!writeState.busy && !exporting) {
+                            exporting = true
+                            scope.launch {
+                                try {
+                                    val csv = viewModel.exportCurrentDayCsv()
+                                    val isEmpty = csv.isBlank() ||
+                                        csv.trim() == ScheduleExport.IMPORT_HEADER
+                                    if (isEmpty) {
+                                        Toast.makeText(
+                                            context,
+                                            exportEmptyMessage,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    } else {
+                                        val intent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, csv)
+                                        }
+                                        context.startActivity(
+                                            Intent.createChooser(
+                                                intent,
+                                                exportShareTitle,
+                                            ),
+                                        )
+                                        onDismiss()
+                                    }
+                                } finally {
+                                    exporting = false
                                 }
-                                context.startActivity(
-                                    Intent.createChooser(
-                                        intent,
-                                        exportShareTitle,
-                                    ),
-                                )
-                                onDismiss()
                             }
                         }
                     },
-                    onClearDay = { currentStep = ManageStep.ClearDayConfirm },
-                    onClear = { currentStep = ManageStep.ClearConfirm },
+                    onClearDay = {
+                        if (!sheetBusy) {
+                            viewModel.clearWriteError()
+                            currentStep = ManageStep.ClearDayConfirm
+                        }
+                    },
+                    onClear = {
+                        if (!sheetBusy) {
+                            viewModel.clearWriteError()
+                            currentStep = ManageStep.ClearConfirm
+                        }
+                    },
                 )
                 ManageStep.Import -> {
                     val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
@@ -219,23 +259,46 @@ fun ManageDataSheet(
                         onTextChange = viewModel::updateImportText,
                         onToggle = viewModel::toggleImportRow,
                         onSetAll = viewModel::selectAllImportRows,
-                        onBack = { if (!writeState.busy) currentStep = ManageStep.Menu },
-                        onImport = { viewModel.importSelected(importState.inputVersion, onDone = onDismiss) },
+                        onBack = {
+                            if (!writeState.busy) {
+                                viewModel.clearWriteError()
+                                currentStep = ManageStep.Menu
+                            }
+                        },
+                        onImport = {
+                            if (!writeState.busy) {
+                                viewModel.importSelected(importState.inputVersion, onDone = onDismiss)
+                            }
+                        },
                     )
                 }
                 ManageStep.ClearConfirm -> ClearConfirmView(
                     title = stringResource(R.string.clear_all_title),
                     message = stringResource(R.string.clear_all_message),
                     confirmText = stringResource(R.string.clear_all_confirm),
-                    onBack = { currentStep = ManageStep.Menu },
+                    busy = writeState.busy,
+                    onBack = {
+                        if (!writeState.busy) {
+                            viewModel.clearWriteError()
+                            currentStep = ManageStep.Menu
+                        }
+                    },
                     onConfirm = {
-                        viewModel.clearAllData(onDone = onDismiss)
+                        if (!writeState.busy) {
+                            viewModel.clearAllData(onDone = onDismiss)
+                        }
                     },
                 )
                 ManageStep.ClearDayConfirm -> {
                     val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
                     val dayState by rememberDayState(viewModel, currentDate)
                         .collectAsStateWithLifecycle()
+                    var frozenCount by remember(currentDate) { mutableStateOf<Int?>(null) }
+                    var lastIdleCount by remember(currentDate) { mutableIntStateOf(dayState.events.size) }
+                    if (!writeState.busy && frozenCount == null) {
+                        lastIdleCount = dayState.events.size
+                    }
+                    val displayCount = frozenCount ?: if (writeState.busy) lastIdleCount else dayState.events.size
                     val pattern = stringResource(R.string.date_pattern)
                     val dateText = remember(currentDate, pattern) {
                         currentDate.format(DateTimeFormatter.ofPattern(pattern))
@@ -245,12 +308,21 @@ fun ManageDataSheet(
                         message = stringResource(
                             R.string.clear_day_message,
                             dateText,
-                            dayState.events.size,
+                            displayCount,
                         ),
                         confirmText = stringResource(R.string.clear_day_confirm),
-                        onBack = { currentStep = ManageStep.Menu },
+                        busy = writeState.busy,
+                        onBack = {
+                            if (!writeState.busy) {
+                                viewModel.clearWriteError()
+                                currentStep = ManageStep.Menu
+                            }
+                        },
                         onConfirm = {
-                            viewModel.clearDayData(currentDate, onDone = onDismiss)
+                            if (!writeState.busy) {
+                                frozenCount = displayCount
+                                viewModel.clearDayData(currentDate, onDone = onDismiss)
+                            }
                         },
                     )
                 }
@@ -267,6 +339,7 @@ private fun MainMenu(
     onDynamicColorChange: (Boolean) -> Unit,
     notificationsEnabled: Boolean,
     liveUpdatesAlwaysOn: Boolean,
+    busy: Boolean = false,
     onNotificationsEnabledChange: (Boolean) -> Unit,
     onLiveUpdatesAlwaysOnChange: (Boolean) -> Unit,
     onImport: () -> Unit,
@@ -368,6 +441,7 @@ private fun MainMenu(
                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                 title = stringResource(R.string.cd_batch_import),
                 summary = stringResource(R.string.manage_import_summary),
+                enabled = !busy,
                 onClick = onImport,
             )
             GroupDivider()
@@ -377,6 +451,7 @@ private fun MainMenu(
                 iconContainer = MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f),
                 title = stringResource(R.string.cd_export),
                 summary = stringResource(R.string.manage_export_summary),
+                enabled = !busy,
                 onClick = onExport,
             )
         }
@@ -402,6 +477,7 @@ private fun MainMenu(
                 title = stringResource(R.string.cd_clear_day),
                 summary = stringResource(R.string.manage_clear_day_summary),
                 titleColor = MaterialTheme.colorScheme.error,
+                enabled = !busy,
                 onClick = onClearDay,
             )
             GroupDivider()
@@ -412,6 +488,7 @@ private fun MainMenu(
                 title = stringResource(R.string.cd_clear_all),
                 summary = stringResource(R.string.manage_clear_summary),
                 titleColor = MaterialTheme.colorScheme.error,
+                enabled = !busy,
                 onClick = onClear,
             )
         }
@@ -545,16 +622,19 @@ private fun ActionRow(
     title: String,
     summary: String,
     titleColor: Color = MaterialTheme.colorScheme.onSurface,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
+        enabled = enabled,
         color = Color.Transparent,
         shape = RoundedCornerShape(0.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .alpha(if (enabled) 1f else 0.5f)
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -598,7 +678,7 @@ private fun ActionRow(
 }
 
 @Composable
-private fun ImportView(
+internal fun ImportView(
     state: ImportUiState,
     busy: Boolean = false,
     onTextChange: (String) -> Unit,
@@ -615,27 +695,14 @@ private fun ImportView(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 20.dp),
     ) {
-        items(state.issues) { issue ->
-            val reason = when (issue.error) {
-                com.lamuier.scheduletimeline.data.ImportError.Fields -> R.string.import_error_fields
-                com.lamuier.scheduletimeline.data.ImportError.Date -> R.string.import_error_date
-                com.lamuier.scheduletimeline.data.ImportError.Team -> R.string.import_error_team
-                com.lamuier.scheduletimeline.data.ImportError.Time -> R.string.import_error_time
-                com.lamuier.scheduletimeline.data.ImportError.EndBeforeStart -> R.string.import_error_interval
-                com.lamuier.scheduletimeline.data.ImportError.Type -> R.string.import_error_type
-                com.lamuier.scheduletimeline.data.ImportError.Quoting -> R.string.import_error_quoting
-            }
-            Text(stringResource(R.string.import_error_row, issue.line, stringResource(reason)),
-                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-
-        item {
+        item(key = "import-header-input") {
             SheetHeader(
                 title = stringResource(R.string.cd_batch_import),
                 subtitle = stringResource(R.string.import_hint),
                 leading = {
                     IconButton(
                         onClick = onBack,
+                        enabled = !busy,
                         modifier = Modifier.size(40.dp),
                     ) {
                         Icon(
@@ -652,7 +719,8 @@ private fun ImportView(
 
             OutlinedTextField(
                 value = state.text,
-                onValueChange = onTextChange,
+                onValueChange = { if (!busy) onTextChange(it) },
+                enabled = !busy,
                 placeholder = {
                     Text(
                         text = sample,
@@ -674,9 +742,31 @@ private fun ImportView(
             )
 
             Spacer(Modifier.height(16.dp))
-
         }
-        item {
+        itemsIndexed(
+            items = state.issues,
+            key = { index, issue -> "issue-$index-${issue.line}-${issue.error.name}" },
+        ) { _, issue ->
+            val reason = when (issue.error) {
+                com.lamuier.scheduletimeline.data.ImportError.Fields -> R.string.import_error_fields
+                com.lamuier.scheduletimeline.data.ImportError.Date -> R.string.import_error_date
+                com.lamuier.scheduletimeline.data.ImportError.Team -> R.string.import_error_team
+                com.lamuier.scheduletimeline.data.ImportError.Time -> R.string.import_error_time
+                com.lamuier.scheduletimeline.data.ImportError.EndBeforeStart -> R.string.import_error_interval
+                com.lamuier.scheduletimeline.data.ImportError.Type -> R.string.import_error_type
+                com.lamuier.scheduletimeline.data.ImportError.Quoting -> R.string.import_error_quoting
+            }
+            Text(
+                stringResource(R.string.import_error_row, issue.line, stringResource(reason)),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
+        item(key = "import-preview") {
+            if (state.issues.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+            }
             PreviewSection(
                 events = state.previewEvents,
                 selectedIndexes = state.selectedIndexes,
@@ -684,10 +774,10 @@ private fun ImportView(
                 onSetAll = onSetAll,
                 sample = sample,
                 dark = dark,
+                busy = busy,
             )
-
         }
-        item {
+        item(key = "import-action") {
             Spacer(Modifier.height(18.dp))
 
             Button(
@@ -703,7 +793,7 @@ private fun ImportView(
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
-        }
+            }
         }
     }
 }
@@ -817,6 +907,7 @@ internal fun PreviewSection(
     onSetAll: (Boolean) -> Unit,
     sample: String,
     dark: Boolean,
+    busy: Boolean = false,
 ) {
     val context = LocalContext.current
     val allSelected = events.isNotEmpty() && selectedIndexes.size == events.size
@@ -853,8 +944,12 @@ internal fun PreviewSection(
                     ),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { onSetAll(!allSelected) },
+                    color = if (busy) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.clickable(enabled = !busy) { onSetAll(!allSelected) },
                 )
             }
         }
@@ -897,11 +992,17 @@ internal fun PreviewSection(
                 }
                 }
             } else {
-                itemsIndexed(events) { index, event ->
+                itemsIndexed(
+                    items = events,
+                    key = { index, event ->
+                        "$index:${event.dayKey}:${event.startMinutes}:${event.endMinutes}:${event.eventType}:${event.hashCode()}"
+                    },
+                ) { index, event ->
                     ImportPreviewRow(
                         event = event,
                         selected = index in selectedIndexes,
                         dark = dark,
+                        enabled = !busy,
                         onToggle = { onToggle(index) },
                     )
                 }
@@ -916,6 +1017,7 @@ private fun ImportPreviewRow(
     event: ScheduleEvent,
     selected: Boolean,
     dark: Boolean,
+    enabled: Boolean = true,
     onToggle: () -> Unit,
 ) {
     val colors = eventTypeColors(event).adaptTo(dark)
@@ -923,15 +1025,16 @@ private fun ImportPreviewRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .alpha(if (selected) 1f else 0.45f)
+            .alpha(if (!enabled) 0.38f else if (selected) 1f else 0.45f)
             .background(colors.container)
-            .combinedClickable(onClick = onToggle)
+            .combinedClickable(enabled = enabled, onClick = onToggle)
             .padding(start = 2.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Checkbox(
             checked = selected,
             onCheckedChange = null,
+            enabled = enabled,
             colors = CheckboxDefaults.colors(
                 checkedColor = colors.accent,
                 checkmarkColor = colors.onContainer,
@@ -980,10 +1083,11 @@ private fun ImportPreviewRow(
 }
 
 @Composable
-private fun ClearConfirmView(
+internal fun ClearConfirmView(
     title: String,
     message: String,
     confirmText: String,
+    busy: Boolean = false,
     onBack: () -> Unit,
     onConfirm: () -> Unit,
 ) {
@@ -999,7 +1103,7 @@ private fun ClearConfirmView(
                 .padding(top = 8.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = onBack, enabled = !busy) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.cd_back),
@@ -1043,6 +1147,7 @@ private fun ClearConfirmView(
 
         Button(
             onClick = onConfirm,
+            enabled = !busy,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
@@ -1061,6 +1166,7 @@ private fun ClearConfirmView(
         Spacer(Modifier.height(10.dp))
         OutlinedButton(
             onClick = onBack,
+            enabled = !busy,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),

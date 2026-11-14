@@ -2,6 +2,7 @@ package com.lamuier.scheduletimeline.data
 
 import android.content.Context
 import android.os.Build
+import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,19 +16,26 @@ class NotificationPreferences(context: Context) {
     val alwaysOn: StateFlow<Boolean> = _alwaysOn.asStateFlow()
 
     fun setEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
+        prefs.edit { putBoolean(KEY_ENABLED, enabled) }
         _enabled.value = enabled
         if (!enabled) setAlwaysOn(false)
     }
 
     fun setAlwaysOn(alwaysOn: Boolean) {
-        prefs.edit().putBoolean(KEY_ALWAYS_ON, alwaysOn).apply()
+        prefs.edit { putBoolean(KEY_ALWAYS_ON, alwaysOn) }
         _alwaysOn.value = alwaysOn
+    }
+
+    fun isPermissionRequested(): Boolean = prefs.getBoolean(KEY_PERMISSION_REQUESTED, false)
+
+    fun setPermissionRequested(requested: Boolean) {
+        prefs.edit { putBoolean(KEY_PERMISSION_REQUESTED, requested) }
     }
 
     private companion object {
         const val PREFS = "notification_prefs"
         const val KEY_ENABLED = "schedule_notifications_enabled"
         const val KEY_ALWAYS_ON = "live_updates_always_on"
+        const val KEY_PERMISSION_REQUESTED = "notification_permission_requested"
     }
 }

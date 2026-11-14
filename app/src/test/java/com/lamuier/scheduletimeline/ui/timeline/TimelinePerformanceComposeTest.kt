@@ -89,7 +89,7 @@ class TimelinePerformanceComposeTest {
         compose.setContent {
             ScheduleTimelineTheme {
                 Box(Modifier.width(360.dp).height(720.dp)) {
-                    TimelineList(TimelineBuilder.build(events), events, onSelectEvent = { selected = it.event.id })
+                    TimelineList(TimelineBuilder.build(events), onSelectEvent = { selected = it.event.id })
                 }
             }
         }

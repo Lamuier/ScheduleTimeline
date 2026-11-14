@@ -7,13 +7,11 @@ import android.os.Bundle
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
 import com.lamuier.scheduletimeline.data.ScheduleEvent
-import com.lamuier.scheduletimeline.data.teamDisplay
 import org.json.JSONObject
 
 /** Adds Xiaomi HyperIsland OS3 extras while retaining the normal Android notification. */
 object XiaomiHyperIslandAdapter {
     private const val BUSINESS_NAME = "schedule_timeline"
-    private const val PICTURE_KEY = "schedule"
     private const val PICTURE_REF = "miui.focus.pic_schedule"
     private const val PARAM_KEY = "miui.focus.param"
     // Keep the payload protocol aligned with HyperIsland-ToolKit's OS3 template.
@@ -25,7 +23,6 @@ object XiaomiHyperIslandAdapter {
         title: String,
         content: String,
         events: List<ScheduleEvent>,
-        startMillis: Long,
         upcoming: Boolean,
     ): Boolean {
         if (events.isEmpty()) return false

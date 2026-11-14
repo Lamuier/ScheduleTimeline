@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ScheduleEvent::class, Category::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class ScheduleDatabase : RoomDatabase() {
@@ -95,6 +95,25 @@ abstract class ScheduleDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP INDEX IF EXISTS `index_schedule_events_dayKey`")
+                db.execSQL("DROP INDEX IF EXISTS `index_schedule_events_linkedPerformanceId`")
+                db.execSQL("DROP INDEX IF EXISTS `index_schedule_events_team`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_schedule_events_dayKey_startMinutes_endMinutes` " +
+                        "ON `schedule_events` (`dayKey`, `startMinutes`, `endMinutes`)",
+                )
+            }
+        }
+
+        internal val ALL_MIGRATIONS = arrayOf(
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+        )
+
         fun get(context: Context): ScheduleDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -102,7 +121,7 @@ abstract class ScheduleDatabase : RoomDatabase() {
                     ScheduleDatabase::class.java,
                     "schedule_timeline.db",
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(*ALL_MIGRATIONS)
                     // v1 schema predates categories; wipe only that ancient version
                     .fallbackToDestructiveMigrationFrom(true, 1)
                     .build()

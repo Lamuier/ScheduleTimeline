@@ -2,9 +2,8 @@ package com.lamuier.scheduletimeline
 
 import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
-import android.os.Build
+import android.provider.Settings
 import java.time.LocalDate
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,7 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -24,13 +23,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.lamuier.scheduletimeline.notification.areAppNotificationsEnabled
+import com.lamuier.scheduletimeline.notification.hasNotificationPermission
+import com.lamuier.scheduletimeline.notification.hasSystemNotificationAccess
 import com.lamuier.scheduletimeline.ui.edit.EditEventScreen
 import com.lamuier.scheduletimeline.ui.theme.ScheduleTimelineTheme
 import com.lamuier.scheduletimeline.ui.timeline.TimelineScreen
 import com.lamuier.scheduletimeline.widget.ScheduleWidgetProviderLarge
 
 class MainActivity : ComponentActivity() {
-    // 桌面小组件深链：点击日程项直接打开对应事件编辑页（冷启动 / 热启动均生效）
+    // 桌面小组件 / 提醒通知深链：点击直接打开对应事件编辑页（冷启动 / 热启动均生效）
     private val widgetEventId = mutableStateOf<Long?>(null)
 
     // 桌面 Shortcut（长按图标）：待处理动作，Compose 侧消费后清空
@@ -39,11 +41,18 @@ class MainActivity : ComponentActivity() {
     // 批量导入 Shortcut：直达主屏管理面板的导入步骤
     private val requestOpenImport = mutableStateOf(false)
 
+    // 前往系统通知设置后返回时恢复开启偏好
+    private var pendingEnableFromSettings = false
+    private var pendingAlwaysOnFromSettings = false
+
+    private val app: ScheduleApplication
+        get() = application as ScheduleApplication
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 仅冷启动消费深链，避免旋转重建把已打开的编辑页再导航一次、冲掉未保存改动。
         if (savedInstanceState == null) {
-            handleWidgetIntent(intent)
+            handleDeepLinkIntent(intent)
             handleShortcutIntent(intent)
         }
         enableEdgeToEdge()
@@ -55,11 +64,26 @@ class MainActivity : ComponentActivity() {
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission(),
             ) { granted ->
-                viewModel.setNotificationsEnabled(granted)
-                if (granted && pendingAlwaysOn) {
-                    viewModel.setLiveUpdatesAlwaysOn(true)
+                val prefs = app.notificationPreferences
+                if (granted) {
+                    prefs.setPermissionRequested(false)
+                    if (areAppNotificationsEnabled(this@MainActivity)) {
+                        viewModel.setNotificationsEnabled(true)
+                        if (pendingAlwaysOn) {
+                            viewModel.setLiveUpdatesAlwaysOn(true)
+                        }
+                        pendingAlwaysOn = false
+                    } else {
+                        pendingEnableFromSettings = true
+                        pendingAlwaysOnFromSettings = pendingAlwaysOn
+                        pendingAlwaysOn = false
+                        openNotificationSettings()
+                    }
+                } else {
+                    prefs.setPermissionRequested(true)
+                    viewModel.setNotificationsEnabled(false)
+                    pendingAlwaysOn = false
                 }
-                pendingAlwaysOn = false
             }
             val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
             val dynamicColor by viewModel.dynamicColor.collectAsStateWithLifecycle()
@@ -117,19 +141,32 @@ class MainActivity : ComponentActivity() {
                             onOpenImportConsumed = { requestOpenImport.value = false },
                             onRequestNotificationPermission = { alwaysOn ->
                                 pendingAlwaysOn = alwaysOn
-                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                                    ContextCompat.checkSelfPermission(
+                                val hasPermission = hasNotificationPermission(this@MainActivity)
+                                if (!hasPermission) {
+                                    val shouldShowRationale = ActivityCompat.shouldShowRequestPermissionRationale(
                                         this@MainActivity,
                                         Manifest.permission.POST_NOTIFICATIONS,
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                ) {
+                                    )
+                                    val prefs = app.notificationPreferences
+                                    if (!shouldShowRationale && prefs.isPermissionRequested()) {
+                                        pendingEnableFromSettings = true
+                                        pendingAlwaysOnFromSettings = alwaysOn
+                                        pendingAlwaysOn = false
+                                        openNotificationSettings()
+                                    } else {
+                                        notificationPermissionLauncher.launch(
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        )
+                                    }
+                                } else if (!areAppNotificationsEnabled(this@MainActivity)) {
+                                    pendingEnableFromSettings = true
+                                    pendingAlwaysOnFromSettings = alwaysOn
+                                    pendingAlwaysOn = false
+                                    openNotificationSettings()
+                                } else {
                                     viewModel.setNotificationsEnabled(true)
                                     if (alwaysOn) viewModel.setLiveUpdatesAlwaysOn(true)
                                     pendingAlwaysOn = false
-                                } else {
-                                    notificationPermissionLauncher.launch(
-                                        Manifest.permission.POST_NOTIFICATIONS,
-                                    )
                                 }
                             },
                         )
@@ -163,26 +200,73 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        (application as ScheduleApplication).refreshNotifications()
+        val prefs = app.notificationPreferences
+        if (hasSystemNotificationAccess(this)) {
+            if (pendingEnableFromSettings) {
+                prefs.setEnabled(true)
+                if (pendingAlwaysOnFromSettings) {
+                    prefs.setAlwaysOn(true)
+                }
+            }
+        } else if (prefs.enabled.value) {
+            prefs.setEnabled(false)
+        }
+        pendingEnableFromSettings = false
+        pendingAlwaysOnFromSettings = false
+        app.refreshNotifications()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleWidgetIntent(intent)
+        handleDeepLinkIntent(intent)
         handleShortcutIntent(intent)
     }
 
-    private fun handleWidgetIntent(intent: Intent?) {
+    private fun openNotificationSettings() {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        runCatching { startActivity(intent) }
+    }
+
+    private fun handleDeepLinkIntent(intent: Intent?) {
         if (intent == null) return
-        val id = intent.getLongExtra(
+        val extraId = intent.getLongExtra(
             ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID,
             -1L,
         )
-        if (id != -1L) {
-            widgetEventId.value = id
+        val reminderId = parseReminderEventId(intent)
+        val targetId = when {
+            extraId != -1L -> extraId
+            reminderId != null && reminderId > 0L -> reminderId
+            else -> null
+        }
+        if (targetId != null) {
+            widgetEventId.value = targetId
+        }
+        if (extraId != -1L) {
             intent.removeExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID)
         }
+        if (intent.action == "${packageName}.OPEN_REMINDER" ||
+            intent.action == "${packageName}.OPEN_WIDGET_EVENT" ||
+            intent.action == ScheduleWidgetProviderLarge.ACTION_WIDGET_ITEM
+        ) {
+            intent.action = null
+        }
+        val data = intent.data
+        if (data?.scheme == "schedule" &&
+            (data.host == "reminder" || data.host == "widget")
+        ) {
+            intent.data = null
+        }
+    }
+
+    private fun parseReminderEventId(intent: Intent): Long? {
+        val data = intent.data
+        val matchesAction = intent.action == "${packageName}.OPEN_REMINDER"
+        val matchesUri = data?.scheme == "schedule" && data.host == "reminder"
+        if (!matchesAction && !matchesUri) return null
+        return data?.lastPathSegment?.toLongOrNull()
     }
 
     private fun handleShortcutIntent(intent: Intent?) {
@@ -191,7 +275,11 @@ class MainActivity : ComponentActivity() {
             AppShortcuts.ACTION_TODAY,
             AppShortcuts.ACTION_NEXT_SCHEDULED,
             AppShortcuts.ACTION_IMPORT,
-                -> pendingShortcutAction.value = intent.action
+                -> {
+                AppShortcuts.reportUsed(this, intent.action)
+                pendingShortcutAction.value = intent.action
+                intent.action = null
+            }
         }
     }
 }

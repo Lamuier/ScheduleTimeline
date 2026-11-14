@@ -1,6 +1,11 @@
 package com.lamuier.scheduletimeline
 
+import android.Manifest
+import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.Settings
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModelProvider
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
@@ -10,7 +15,10 @@ import kotlinx.coroutines.runBlocking
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -196,5 +204,129 @@ class SystemEntryComposeTest {
         compose.onNodeWithText("批量导入").assertIsDisplayed()
         compose.runOnIdle { org.robolectric.shadows.ShadowDialog.getLatestDialog().onBackPressed() }
         compose.onNodeWithText("批量导入").assertDoesNotExist()
+    }
+
+    @Test fun reminderDeepLinkOpensEditorAndClearsIntentWithoutReplayingOnRecreate() {
+        val app = RuntimeEnvironment.getApplication() as ScheduleApplication
+        val today = LocalDate.now()
+        val id = runBlocking {
+            app.repository.save(
+                ScheduleEvent(team = "ReminderTeam", dayKey = today.toString(), startMinutes = 600, endMinutes = 660),
+            )
+        }
+        val reminderIntent = Intent(app, MainActivity::class.java)
+            .setAction("${app.packageName}.OPEN_REMINDER")
+            .setData("schedule://reminder/$id".toUri())
+        val coldController = Robolectric.buildActivity(MainActivity::class.java, reminderIntent).setup()
+        try {
+            compose.waitUntil(5000) {
+                compose.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty()
+            }
+            val coldVm = ViewModelProvider(
+                coldController.get(),
+                ScheduleViewModel.factory(app),
+            )[ScheduleViewModel::class.java]
+            compose.waitUntil(5000) { coldVm.editUiState.value.loadedId == id }
+            assertEquals(id, coldVm.editUiState.value.loadedId)
+            assertNull(coldController.get().intent.action)
+            assertNull(coldController.get().intent.data)
+
+            compose.onNodeWithContentDescription("返回").performClick()
+            compose.waitUntil(5000) {
+                compose.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isEmpty()
+            }
+
+            coldController.recreate()
+            compose.waitForIdle()
+            assertTrue(compose.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isEmpty())
+
+            coldController.newIntent(
+                Intent(app, MainActivity::class.java)
+                    .setAction("${app.packageName}.OPEN_REMINDER")
+                    .setData("schedule://reminder/$id".toUri()),
+            )
+            compose.waitUntil(5000) {
+                compose.onAllNodesWithContentDescription("返回").fetchSemanticsNodes().isNotEmpty()
+            }
+            val recreatedVm = ViewModelProvider(
+                coldController.get(),
+                ScheduleViewModel.factory(app),
+            )[ScheduleViewModel::class.java]
+            compose.waitUntil(5000) { recreatedVm.editUiState.value.loadedId == id }
+            assertEquals(id, recreatedVm.editUiState.value.loadedId)
+        } finally {
+            coldController.pause().stop().destroy()
+        }
+    }
+
+    @Test fun resumeSyncsRevokedSystemNotificationPermissionOrBlockedChannels() {
+        val app = RuntimeEnvironment.getApplication() as ScheduleApplication
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        compose.runOnIdle { vm().setNotificationsEnabled(true) }
+        runBlocking { app.refreshNotificationsAndWait() }
+        compose.waitForIdle()
+        assertTrue(vm().notificationsEnabled.value)
+
+        shadowOf(app).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        controller.pause().resume()
+        compose.waitForIdle()
+        assertFalse(vm().notificationsEnabled.value)
+        assertFalse(app.notificationPreferences.enabled.value)
+
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = app.getSystemService(NotificationManager::class.java)
+        assertTrue(manager.notificationChannels.isNotEmpty())
+        manager.notificationChannels.forEach { it.importance = NotificationManager.IMPORTANCE_NONE }
+        compose.runOnIdle { app.notificationPreferences.setEnabled(true) }
+        controller.pause().resume()
+        compose.waitForIdle()
+        assertFalse(vm().notificationsEnabled.value)
+    }
+
+    @Suppress("DEPRECATION")
+    @Test fun permissionTogglePromptsFirstTimeThenOpensSettingsOnPermanentDenial() {
+        val app = RuntimeEnvironment.getApplication() as ScheduleApplication
+        shadowOf(app).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        app.notificationPreferences.setPermissionRequested(false)
+
+        compose.onNodeWithContentDescription(activity.getString(R.string.cd_more)).performClick()
+        compose.onNodeWithText(activity.getString(R.string.notification_toggle_title)).assertIsDisplayed()
+
+        compose.onAllNodes(isToggleable())[1].performScrollTo().performClick()
+        compose.waitForIdle()
+
+        val permissionRequest = shadowOf(activity).nextStartedActivityForResult
+        assertNotNull(permissionRequest)
+        assertEquals(
+            "android.content.pm.action.REQUEST_PERMISSIONS",
+            permissionRequest.intent.action,
+        )
+        assertEquals(
+            "android.content.pm.action.REQUEST_PERMISSIONS",
+            shadowOf(activity).nextStartedActivity?.action,
+        )
+
+        compose.runOnIdle {
+            activity.onRequestPermissionsResult(
+                permissionRequest.requestCode,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                intArrayOf(PackageManager.PERMISSION_DENIED),
+            )
+        }
+        compose.waitForIdle()
+        assertTrue(app.notificationPreferences.isPermissionRequested())
+        assertNull(shadowOf(activity).nextStartedActivity)
+
+        compose.onAllNodes(isToggleable())[1].performScrollTo().performClick()
+        compose.waitForIdle()
+        val settingsIntent = shadowOf(activity).nextStartedActivity
+        assertNotNull(settingsIntent)
+        assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, settingsIntent.action)
+        assertEquals(app.packageName, settingsIntent.getStringExtra(Settings.EXTRA_APP_PACKAGE))
+
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        controller.pause().resume()
+        compose.waitForIdle()
+        assertTrue(vm().notificationsEnabled.value)
     }
 }

@@ -34,6 +34,42 @@ data class EditUiState(
             TeamNames.normalize(selected + pending)
         }
     }
+
+    internal fun withoutTeam(name: String): EditUiState {
+        val parsedInput = TeamNames.parseInput(teamInput)
+        val nextInput = if (name in parsedInput) {
+            parsedInput.filterNot { it == name }.joinToString(" / ")
+        } else {
+            teamInput
+        }
+        return copy(
+            teamNames = teamNames.filterNot { it == name },
+            teamInput = nextInput,
+        )
+    }
+
+    fun hasUnsavedChanges(baseline: EditUiState?): Boolean {
+        if (error == EditValidationError.Loading || error == EditValidationError.MissingEvent) {
+            return false
+        }
+        if (baseline == null || baseline.sessionId != sessionId) {
+            return teamNames.isNotEmpty() || teamInput.isNotBlank() ||
+                title.isNotBlank() || location.isNotBlank() || note.isNotBlank()
+        }
+        return teamNames != baseline.teamNames ||
+            teamInput != baseline.teamInput ||
+            eventType != baseline.eventType ||
+            tokutenKind != baseline.tokutenKind ||
+            title != baseline.title ||
+            location != baseline.location ||
+            startMinutes != baseline.startMinutes ||
+            endMinutes != baseline.endMinutes ||
+            note != baseline.note
+    }
+
+    companion object {
+        private const val serialVersionUID: Long = 1L
+    }
 }
 
 enum class EditValidationError {

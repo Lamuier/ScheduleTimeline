@@ -17,6 +17,35 @@
 
 （暂无未发布内容）
 
+## 1.16.1 - 2026-11-15
+
+### 修复
+- CSV 导入解析支持大小写不敏感匹配英文类型值 `"TOKUTEN"` / `"PERFORMANCE"`，并在解析记录前剥离 UTF-8 BOM（`\uFEFF`），同步修正 `ScheduleExport` 过期注释。
+- 编辑页与 `ScheduleViewModel` 状态及防误触修复：将未保存修改基线 `editBaseline` 迁入 `SavedStateHandle` 持久化，旋转或进程重建后仍保留未保存提示；`deleteTeam` 同步更新草稿与基线避免误报脏状态同时保留其余未保存修改；`writeState.busy` 期间禁用顶栏返回、系统返回拦截、团队芯片、添加团队按钮、时间选择器及确认/删除弹窗；缺失日程（`MissingEvent` / `loadedId == 0L`）时禁用底部「删除」按钮；`setStartMinutes` 在零时长/负时长及临近 `23:59` 边界时安全钳位并保持有效时段。
+- 时间轴详情面板 `EventDetailSheet` 改用点击卡片所属页面日期的 `rememberDayState` 解析同日关联日程，消除快速切日后的跨页状态错位。
+- 管理面板 `ManageDataSheet` 交互与边界修复：空白日导出改为识别仅含 `IMPORT_HEADER` 的 CSV 并正确弹出无日程提示，同时避免连点重复导出；进入面板与导入页时清理残留写失败状态；`ImportView` 列表恢复表头与输入框在解析问题列表之前显示，并为预览行补充稳定 `key`；`ClearDayConfirm` 冻结待清空条数防止删除过程中计数闪烁为 `0`；写操作与导出期间禁用数据操作控件与弹窗关闭。
+- `ScheduleRepository.firstDayKeyOnOrAfter` 补齐 `ensureScheduleReady()`，确保冷启动快捷方式跳转前完成遗留 `"default"` 日程迁移与合并。
+- `MainActivity` 接入通知深链 `OPEN_REMINDER`（`schedule://reminder/{eventId}`）冷/热启动直达对应编辑页并在消费后清理 Intent 防止旋转重放；`onResume` 同步检查系统 `POST_NOTIFICATIONS` 权限、应用通知总开关及渠道启用状态，并在永久拒绝或系统通知被关闭时引导跳转系统应用通知设置；桌面快捷方式补充 `AppShortcuts.reportUsed` 上报。
+- 修复 `ScheduleNotificationCoordinator` 在日程窗口跨度超过 24.85 天（`Int.MAX_VALUE` ms）时进度计算 `Long -> Int` 溢出的问题，改用按比例缩放的 `scaledProgress`；日期格式化器改为动态获取以适配区域变更。
+- 修复 `BackgroundRestrictionHelper` 魅族后台权限跳转误将 Action `com.meizu.safe.security.SHOW_APPSEC` 当作 `ComponentName` 类名的问题，改用 Action Intent 并附带 `packageName` 参数。
+- 修复桌面小组件 `ScheduleWidgetUpdater` 中与仅限当日过滤矛盾的跨日死分支，将 `lastContext` 改为 `WeakReference` 消除静态上下文泄漏，并将 4×3 列表投影为轻量 `ListItemContent` 避免非展示字段改动触发无效列表重绘。
+- 将通知小图标 `ic_notification.png` 修正为纯白（`#FFFFFF`）透明通道单色图标，消除 Android Lint `IconColors` 告警，并顺带修复 2×1 小组件 `SmallSp`（`10sp` → `11sp` 并重生成深浅色预览图）、`ObsoleteSdkInt`、`UnusedAttribute`、`ReportShortcutUsage`、`UseKtx` 与 `ModifierParameter` 等告警。
+
+### 变更
+- 时间轴时钟 `ScheduleClock` 改用 `ScheduleTimeSnapshot.millisUntilNextMinute()` 对齐自然分钟边界唤醒刷新，减少无效重组并在跨分、跨日或时区变化时及时更新。
+- 优化 `ScheduleRepository`：合并并去除 `save` 路径中的重复数据库查询与团队写入，`deleteTeam` 改用转义 SQL `LIKE` 预筛配合 `TeamNames` 精确匹配；`XiaomiHyperIslandCapabilityReader` 缓存 `SystemProperties` 反射查找结果。
+- Room 数据库 `ScheduleDatabase` 升级至 `version = 6`（导出 `app/schemas/.../6.json`），将 `ScheduleEvent` 原先三个单列索引收拢为 `(dayKey, startMinutes, endMinutes)` 复合索引并编写 `MIGRATION_5_6`，补充覆盖 `2→6` 至 `5→6` 路径及查询计划的自动化迁移测试。
+- 清理零调用方冗余代码与资源：移除 `SampleData`、`LanePlacement`、`distinctDayKeys`、`ScheduleViewModel` 废弃流与接口、`Theme.kt` 未使用的 `categoryColors` / `FixedCategoryIndex`、`Guide.label`、通知与超级岛冗余成员及未使用资源（`ic_launcher.xml`、`widget_upcoming_later` 等），并保留完善对应单元测试与 Compose UI 测试覆盖。
+
+### 构建
+- 版本判定：1.16.0 → 1.16.1；本批集中修复审计发现的缺陷、强化表单并发与生命周期安全、升级 Room 复合索引并完成性能/Lint 与文档维护，不新增独立业务页面或不向后兼容变更，按修订版升级 Z，versionCode 32 → 33。沿用原签名，Room schema 5 → 6（提供正式 `MIGRATION_5_6` 向后兼容迁移）。
+- 修复 `scripts/build_support.py` 中 Windows `local.properties` 的 `sdk.dir` 解析（单遍反转义 `\uXXXX` 与反斜杠，并兼容手动编写的未转义 Windows 原始路径），补充 Python 回归测试。
+- 在 `app/proguard-rules.pro` 为 `EditUiState`、`EditValidationError`、`EventType`、`TokutenKind` 补充 `-keep` 规则并固定 `serialVersionUID`，保障 Release R8 混淆下的 `SavedStateHandle` 序列化兼容。
+- 收敛 `locales_config.xml` 与 `app/build.gradle.kts` 的 `localeFilters`，移除未提供的 `en` 而仅保留 `zh`。
+
+### 文档
+- 同步更新 `docs/hyperisland-live-updates.md`（修正 `compileSdk 37`、Kotlin `2.3.10`、状态胶囊/大岛文案、`ReminderStore` 提醒机制与 `enableFloat`/`islandFirstFloat` 对齐描述）、`docs/UI-design.md`（对齐实际 `eventTypeColors` 着色说明）、`THIRD_PARTY_NOTICES.md`（对齐 `gradle/libs.versions.toml` 组件版本）、`build.sh` 与 `scripts/python.ps1` 注释指向 `docs/technical.md`，并在 `.gitignore` 忽略 `replay_pid*`、`screen_*.png` 与 `.adb_tmp/`。
+
 ## 1.16.0 - 2026-11-07
 
 ### 新增

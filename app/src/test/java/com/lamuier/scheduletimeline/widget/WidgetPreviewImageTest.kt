@@ -60,6 +60,13 @@ class WidgetPreviewImageTest {
         root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         root.layout(0, 0, width, height)
+        if (preview.layout == R.layout.widget_schedule_small_preview) {
+            root.textViews().filter { it.visibility == View.VISIBLE }.forEach { tv ->
+                assertTrue("Text truncated horizontally: ${tv.text}", (tv.layout?.getEllipsisCount(0) ?: 0) == 0)
+                val pos = IntArray(2).also { tv.getLocationInWindow(it) }
+                assertTrue("Text clipped vertically: ${tv.text}", pos[1] + tv.height <= height)
+            }
+        }
         return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { root.draw(Canvas(it)) }
     }
 

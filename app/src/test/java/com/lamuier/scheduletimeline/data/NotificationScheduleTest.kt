@@ -11,37 +11,40 @@ class NotificationScheduleTest {
     private val date = LocalDate.of(2026, 8, 4)
 
     @Test
-    fun activeAt_returnsOverlappingEvents() {
+    fun snapshot_activeReturnsOverlappingEvents() {
         val events = listOf(
             event(1, 10 * 60, 11 * 60),
             event(2, 10 * 60 + 30, 12 * 60),
         )
         val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + (10 * 60 + 45) * 60_000L
 
-        assertEquals(listOf(1L, 2L), NotificationSchedule.activeAt(events, now, zone).map { it.event.id })
-    }
-
-    @Test
-    fun nextBoundaryAfter_returnsNearestStartOrEnd() {
-        val events = listOf(event(1, 10 * 60, 11 * 60), event(2, 12 * 60, 13 * 60))
-        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + 9 * 60 * 60_000L
-
-        assertTrue(
-            NotificationSchedule.nextBoundaryAfter(events, now, zone) ==
-                date.atStartOfDay(zone).toInstant().toEpochMilli() + 10 * 60 * 60_000L,
+        assertEquals(
+            listOf(1L, 2L),
+            NotificationSchedule.snapshot(events, now, zone).active.map { it.event.id },
         )
     }
 
     @Test
-    fun nextWindowAfter_returnsUpcomingEventForResidentNotification() {
+    fun snapshot_nextBoundaryReturnsNearestStartOrEnd() {
         val events = listOf(event(1, 10 * 60, 11 * 60), event(2, 12 * 60, 13 * 60))
-        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + 11 * 60 * 60_000L
+        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + 9 * 60 * 60_000L
 
-        assertEquals(2L, NotificationSchedule.nextWindowAfter(events, now, zone)!!.event.id)
+        assertEquals(
+            date.atStartOfDay(zone).toInstant().toEpochMilli() + 10 * 60 * 60_000L,
+            NotificationSchedule.snapshot(events, now, zone).nextBoundary,
+        )
     }
 
     @Test
-    fun nextRefreshAt_returnsPeriodicIntervalWhileActive() {
+    fun snapshot_nextReturnsUpcomingEventForResidentNotification() {
+        val events = listOf(event(1, 10 * 60, 11 * 60), event(2, 12 * 60, 13 * 60))
+        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + 11 * 60 * 60_000L
+
+        assertEquals(2L, NotificationSchedule.snapshot(events, now, zone).next!!.event.id)
+    }
+
+    @Test
+    fun snapshot_nextRefreshAtReturnsPeriodicIntervalWhileActive() {
         val events = listOf(event(1, 10 * 60, 11 * 60))
         val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
         // 10:20，事件 10:00-11:00 进行中
@@ -50,12 +53,12 @@ class NotificationScheduleTest {
         // 进行中：取 min(下一边界 11:00, now + 60s) = now + 60s，让进度条周期走动
         assertEquals(
             now + 60_000L,
-            NotificationSchedule.nextRefreshAt(events, now, zone, 60_000L),
+            NotificationSchedule.snapshot(events, now, zone).nextRefreshAt(60_000L),
         )
     }
 
     @Test
-    fun nextRefreshAt_returnsBoundaryWhenNoActiveEvent() {
+    fun snapshot_nextRefreshAtReturnsBoundaryWhenNoActiveEvent() {
         val events = listOf(event(1, 10 * 60, 11 * 60))
         val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
         // 09:00，空档，下一项 10:00 未开始
@@ -64,7 +67,7 @@ class NotificationScheduleTest {
         // 空档：不周期刷新，返回下一边界（10:00 开始），保证 upcoming → active 切换可靠
         assertEquals(
             dayStart + 10 * 60 * 60_000L,
-            NotificationSchedule.nextRefreshAt(events, now, zone, 60_000L),
+            NotificationSchedule.snapshot(events, now, zone).nextRefreshAt(60_000L),
         )
     }
 
@@ -93,27 +96,22 @@ class NotificationScheduleTest {
     }
 
     @Test
-    fun nextReminderAfter_picksEarliestFutureTrigger() {
+    fun planner_picksEarliestFutureTriggerAndSkipsMissedSilently() {
         val events = listOf(event(1, 10 * 60, 11 * 60))
+        val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
         // 3 天前的触发点已过、0 点未到时，应选当天 0 点
-        val now = date.atStartOfDay(zone).toInstant().toEpochMilli() - 60 * 60_000L
+        val beforeMidnight = dayStart - 60 * 60_000L
+        val atMidnight = ReminderPlanner.plan(events, beforeMidnight, zone, ReminderState()).next!!
+        assertEquals(dayStart, atMidnight.triggerMillis)
+        assertEquals(ReminderKind.DAY_OF_MIDNIGHT, atMidnight.reminders.single().kind)
 
-        val next = NotificationSchedule.nextReminderAfter(events, now, zone)!!
-        assertEquals(ReminderKind.DAY_OF_MIDNIGHT, next.kind)
-        assertEquals(1L, next.event.id)
-    }
-
-    @Test
-    fun nextReminderAfter_skipsMissedTriggersSilently() {
         // 距开始仅剩 30 分钟才录入：3 天前与 0 点触发点均已过，只补 1 小时前（也已过则为空）
-        val events = listOf(event(1, 10 * 60, 11 * 60))
-        val nowBeforeOneHour = date.atStartOfDay(zone).toInstant().toEpochMilli() + 8 * 60 * 60_000L
-        val nowAfterOneHour = date.atStartOfDay(zone).toInstant().toEpochMilli() +
-            (9 * 60 + 30) * 60_000L
+        val nowBeforeOneHour = dayStart + 8 * 60 * 60_000L
+        val nowAfterOneHour = dayStart + (9 * 60 + 30) * 60_000L
 
-        val next = NotificationSchedule.nextReminderAfter(events, nowBeforeOneHour, zone)!!
-        assertEquals(ReminderKind.ONE_HOUR_BEFORE, next.kind)
-        assertEquals(null, NotificationSchedule.nextReminderAfter(events, nowAfterOneHour, zone))
+        val beforeOneHour = ReminderPlanner.plan(events, nowBeforeOneHour, zone, ReminderState()).next!!
+        assertEquals(ReminderKind.ONE_HOUR_BEFORE, beforeOneHour.reminders.single().kind)
+        assertEquals(null, ReminderPlanner.plan(events, nowAfterOneHour, zone, ReminderState()).next)
     }
 
     @Test
@@ -123,17 +121,18 @@ class NotificationScheduleTest {
             event(2, 12 * 60, 13 * 60),
         )
         val now = date.atStartOfDay(zone).toInstant().toEpochMilli() + (10 * 60 + 30) * 60_000L
+        val snapshot = NotificationSchedule.snapshot(events, now, zone)
 
-        assertTrue(NotificationSchedule.activeAt(events, now, zone).isEmpty())
-        assertEquals(2L, NotificationSchedule.nextWindowAfter(events, now, zone)!!.event.id)
+        assertTrue(snapshot.active.isEmpty())
+        assertEquals(2L, snapshot.next!!.event.id)
     }
 
     @Test
-    fun nextReminderAfter_skipsCompletedTokuten() {
+    fun planner_skipsCompletedTokuten() {
         val events = listOf(event(1, 10 * 60, 11 * 60).copy(completed = true))
         val now = date.atStartOfDay(zone).toInstant().toEpochMilli() - 60 * 60_000L
 
-        assertEquals(null, NotificationSchedule.nextReminderAfter(events, now, zone))
+        assertEquals(null, ReminderPlanner.plan(events, now, zone, ReminderState()).next)
     }
 
     private fun event(id: Long, start: Int, end: Int) = ScheduleEvent(

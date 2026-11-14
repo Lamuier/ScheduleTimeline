@@ -37,6 +37,19 @@ class EventLabelsTest {
         assertEquals("特·StarDiary", EventLabels.notificationLabel(tokuten(TokutenKind.PRE)))
     }
 
+    @Test
+    fun eventTypeStorageFromCsv_recognizesChineseAndEnglishCaseInsensitively() {
+        assertEquals(EventType.TOKUTEN, EventLabels.eventTypeStorageFromCsv("TOKUTEN"))
+        assertEquals(EventType.TOKUTEN, EventLabels.eventTypeStorageFromCsv("tokuten"))
+        assertEquals(EventType.TOKUTEN, EventLabels.eventTypeStorageFromCsv("  Tokuten  "))
+        assertEquals(EventType.TOKUTEN, EventLabels.eventTypeStorageFromCsv("特典"))
+        assertEquals(EventType.TOKUTEN, EventLabels.eventTypeStorageFromCsv("特典会"))
+        assertEquals(EventType.PERFORMANCE, EventLabels.eventTypeStorageFromCsv("PERFORMANCE"))
+        assertEquals(EventType.PERFORMANCE, EventLabels.eventTypeStorageFromCsv("performance"))
+        assertEquals(EventType.PERFORMANCE, EventLabels.eventTypeStorageFromCsv("演出"))
+        assertEquals(EventType.PERFORMANCE, EventLabels.eventTypeStorageFromCsv("舞台演出"))
+    }
+
     private fun performance() = ScheduleEvent(
         team = "StarDiary",
         startMinutes = 14 * 60,

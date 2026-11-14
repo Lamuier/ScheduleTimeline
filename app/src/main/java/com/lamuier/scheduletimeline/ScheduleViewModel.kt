@@ -9,7 +9,6 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import kotlinx.coroutines.CancellationException
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.lamuier.scheduletimeline.data.NearestScheduleHint
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.ScheduleExport
 import com.lamuier.scheduletimeline.data.ScheduleRepository
@@ -42,7 +41,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -61,6 +59,11 @@ data class ScheduleDayState(
 
 /** 分页日期流缓存上限：覆盖视口相邻页与近期回访即可，避免无限累积订阅。 */
 private const val DAY_FLOW_CACHE_CAPACITY = 12
+private const val KEY_EDIT_DRAFT = "editDraft"
+private const val KEY_EDIT_BASELINE = "editBaseline"
+private const val MAX_END_MINUTES = 24 * 60 - 1
+private const val MAX_START_MINUTES = MAX_END_MINUTES - 1
+private const val DEFAULT_EVENT_DURATION_MINUTES = 60
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class ScheduleViewModel(
@@ -93,14 +96,6 @@ class ScheduleViewModel(
             ScheduleDayState(_currentDate.value, emptyList()),
         )
 
-    val events: StateFlow<List<ScheduleEvent>> = dayState
-        .map { it.events }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val timelineItems: StateFlow<List<TimelineItem>> = dayState
-        .map { it.items }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     /** 空日提示共享日期索引，切页时无需等待一次新的数据库查询。 */
     val scheduledDayKeys: StateFlow<List<String>> = repository.observeDayKeys()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -109,11 +104,25 @@ class ScheduleViewModel(
     val teams: StateFlow<List<Category>> = repository.observeCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _editUiState = MutableStateFlow(savedState.get<EditUiState>("editDraft") ?: EditUiState())
+    private val _editUiState = MutableStateFlow(savedState.get<EditUiState>(KEY_EDIT_DRAFT) ?: EditUiState())
     val editUiState: StateFlow<EditUiState> = _editUiState.asStateFlow()
+
+    private val _editBaseline = MutableStateFlow(savedState.get<EditUiState>(KEY_EDIT_BASELINE))
+    private val _isEditDirty = MutableStateFlow(_editUiState.value.hasUnsavedChanges(_editBaseline.value))
+    val isEditDirty: StateFlow<Boolean> = _isEditDirty.asStateFlow()
+
+    private fun setEditSession(draft: EditUiState, baseline: EditUiState?) {
+        _editUiState.value = draft
+        _editBaseline.value = baseline
+        savedState[KEY_EDIT_DRAFT] = draft
+        savedState[KEY_EDIT_BASELINE] = baseline
+        _isEditDirty.value = draft.hasUnsavedChanges(baseline)
+    }
+
     private fun setEditState(state: EditUiState) {
         _editUiState.value = state
-        savedState["editDraft"] = state
+        savedState[KEY_EDIT_DRAFT] = state
+        _isEditDirty.value = state.hasUnsavedChanges(_editBaseline.value)
     }
 
     private fun updateEditState(transform: (EditUiState) -> EditUiState) {
@@ -227,24 +236,9 @@ class ScheduleViewModel(
     fun deleteTeam(name: String) {
         write {
             repository.deleteTeam(name)
-            updateEditState { state ->
-            val pending = TeamNames.parseInput(state.teamInput).filterNot { it == name }
-            state.copy(
-                teamNames = state.teamNames.filterNot { it == name },
-                teamInput = pending.joinToString(" / "),
-            )
-            }
-        }
-    }
-
-    fun batchImport(csvText: String, onDone: () -> Unit = {}) {
-        val dayKey = currentDayKey()
-        write(onDone) {
-            val result = withContext(Dispatchers.Default) {
-                ScheduleExport.parseImportResult(csvText, fallbackDayKey = dayKey)
-            }
-            require(result.issues.isEmpty() && result.drafts.isNotEmpty())
-            repository.importDrafts(result.drafts)
+            val nextDraft = _editUiState.value.withoutTeam(name)
+            val nextBaseline = _editBaseline.value?.withoutTeam(name)
+            setEditSession(draft = nextDraft, baseline = nextBaseline)
         }
     }
 
@@ -264,27 +258,42 @@ class ScheduleViewModel(
         clearWriteError()
         prepareEditJob?.cancel()
         val editDay = currentDayKey()
-        setEditState(EditUiState(sessionId = sessionId, dayKey = editDay, isNew = eventId == null, error = EditValidationError.Loading))
+        setEditSession(
+            draft = EditUiState(sessionId = sessionId, dayKey = editDay, isNew = eventId == null, error = EditValidationError.Loading),
+            baseline = null,
+        )
         prepareEditJob = viewModelScope.launch {
             if (eventId == null) {
-                setEditState(EditUiState(isNew = true, sessionId = sessionId, dayKey = editDay))
+                val loaded = EditUiState(isNew = true, sessionId = sessionId, dayKey = editDay)
+                setEditSession(draft = loaded, baseline = loaded)
                 return@launch
             }
             val existing = try { repository.get(eventId) } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                setEditState(EditUiState(sessionId = sessionId, dayKey = editDay, isNew = false,
-                    error = EditValidationError.WriteFailed))
+                val failed = EditUiState(
+                    sessionId = sessionId,
+                    dayKey = editDay,
+                    isNew = false,
+                    error = EditValidationError.WriteFailed,
+                )
+                setEditSession(draft = failed, baseline = failed)
                 return@launch
             }
             if (existing == null) {
                 ensureActive()
-                setEditState(EditUiState(sessionId = sessionId, dayKey = editDay, isNew = false, error = EditValidationError.MissingEvent))
+                val missing = EditUiState(
+                    sessionId = sessionId,
+                    dayKey = editDay,
+                    isNew = false,
+                    error = EditValidationError.MissingEvent,
+                )
+                setEditSession(draft = missing, baseline = missing)
                 return@launch
             }
             ensureActive()
             val type = EventType.fromStorage(existing.eventType)
-            setEditState(EditUiState(
+            val loaded = EditUiState(
                 sessionId = sessionId,
                 dayKey = existing.dayKey,
                 loadedId = existing.id,
@@ -299,7 +308,8 @@ class ScheduleViewModel(
                 endMinutes = existing.endMinutes,
                 note = existing.note,
                 isNew = false,
-            ))
+            )
+            setEditSession(draft = loaded, baseline = loaded)
         }
     }
 
@@ -358,17 +368,20 @@ class ScheduleViewModel(
 
     fun setStartMinutes(minutes: Int) {
         updateEditState { state ->
-            val duration = state.endMinutes - state.startMinutes
+            val duration = (state.endMinutes - state.startMinutes)
+                .takeIf { it > 0 } ?: DEFAULT_EVENT_DURATION_MINUTES
+            val clampedStart = minutes.coerceIn(0, MAX_START_MINUTES)
+            val clampedEnd = (clampedStart + duration).coerceIn(clampedStart + 1, MAX_END_MINUTES)
             state.copy(
-                startMinutes = minutes,
-                endMinutes = (minutes + duration).coerceAtMost(24 * 60 - 1),
+                startMinutes = clampedStart,
+                endMinutes = clampedEnd,
                 error = null,
             )
         }
     }
 
     fun setEndMinutes(minutes: Int) {
-        updateEditState { it.copy(endMinutes = minutes, error = null) }
+        updateEditState { it.copy(endMinutes = minutes.coerceIn(0, MAX_END_MINUTES), error = null) }
     }
 
     fun saveEdit(onDone: () -> Unit = {}) {
@@ -413,6 +426,10 @@ class ScheduleViewModel(
                         (existing?.completed == true),
                 ),
             )
+            val savedDraft = state.copy(error = null)
+            if (_editUiState.value == state) {
+                setEditSession(draft = savedDraft, baseline = savedDraft)
+            }
         }
     }
 
@@ -420,13 +437,6 @@ class ScheduleViewModel(
 
     fun completeTokuten(id: Long, onDone: () -> Unit = {}) = write(onDone) {
         check(repository.setTokutenCompleted(id, completed = true))
-    }
-
-    suspend fun findNearestScheduleHint(): NearestScheduleHint? {
-        return ScheduleExport.nearestScheduleHint(
-            from = _currentDate.value,
-            dayKeys = repository.distinctDayKeys(),
-        )
     }
 
     private fun currentDayKey(): String =

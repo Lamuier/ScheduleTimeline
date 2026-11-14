@@ -3,6 +3,7 @@ package com.lamuier.scheduletimeline.notification
 import android.Manifest
 import android.app.AlarmManager
 import android.app.Application
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -98,5 +99,36 @@ class ReminderCoordinatorTest {
         coordinator.refresh()
         assertEquals(2, shadowOf(alarms).scheduledAlarms.size)
         assertTrue(shadowOf(alarms).scheduledAlarms.all { it.windowLengthMs != ShadowAlarmManager.WINDOW_EXACT })
+    }
+
+    @Test fun scaledProgressHandlesOver24DaysWithoutIntOverflow() {
+        val start = 1_700_000_000_000L
+        val thirtyDaysMs = 30L * 24 * 60 * 60 * 1000L
+        assertTrue(thirtyDaysMs > Int.MAX_VALUE.toLong())
+        val end = start + thirtyDaysMs
+
+        assertEquals(0, scaledProgress(start, end, start - thirtyDaysMs))
+        assertEquals(0, scaledProgress(start, end, start))
+        assertEquals(250, scaledProgress(start, end, start + thirtyDaysMs / 4))
+        assertEquals(500, scaledProgress(start, end, start + thirtyDaysMs / 2))
+        assertEquals(750, scaledProgress(start, end, start + (thirtyDaysMs * 3) / 4))
+        assertEquals(PROGRESS_MAX, scaledProgress(start, end, end))
+        assertEquals(PROGRESS_MAX, scaledProgress(start, end, end + 60_000L))
+        assertEquals(0, scaledProgress(end, start, start))
+    }
+
+    @Test fun upcomingOver25DaysAwayWithAlwaysOnPostsBoundedZeroProgress() = runBlocking {
+        clock.now = instant("2026-10-01T10:00:00")
+        preferences.setAlwaysOn(true)
+        repository.save(ScheduleEvent(team = "FarFuture", dayKey = "2026-10-31", startMinutes = 600, endMinutes = 660))
+        coordinator.refresh()
+
+        val live = manager.activeNotifications.firstOrNull {
+            it.id == ScheduleNotificationCoordinator.LIVE_NOTIFICATION_ID
+        }
+        assertNotNull(live)
+        val notification = live!!.notification
+        assertEquals(0, notification.extras.getInt(Notification.EXTRA_PROGRESS, -1))
+        assertEquals(PROGRESS_MAX, notification.extras.getInt(Notification.EXTRA_PROGRESS_MAX, -1))
     }
 }

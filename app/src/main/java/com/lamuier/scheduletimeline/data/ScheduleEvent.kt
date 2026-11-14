@@ -7,9 +7,7 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "schedule_events",
     indices = [
-        Index(value = ["dayKey"]),
-        Index(value = ["linkedPerformanceId"]),
-        Index(value = ["team"]),
+        Index(value = ["dayKey", "startMinutes", "endMinutes"]),
     ],
 )
 data class ScheduleEvent(

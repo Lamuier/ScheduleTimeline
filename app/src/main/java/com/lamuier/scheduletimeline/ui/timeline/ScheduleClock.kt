@@ -9,15 +9,26 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.lamuier.scheduletimeline.data.ScheduleTimeSnapshot
 import kotlinx.coroutines.delay
 import java.time.Clock
+import java.time.ZoneId
 
 @Composable
-internal fun rememberScheduleTime(clock: Clock = Clock.systemUTC()): State<ScheduleTimeSnapshot> {
+internal fun rememberScheduleTime(
+    clock: Clock = Clock.systemUTC(),
+    zone: ZoneId? = null,
+): State<ScheduleTimeSnapshot> {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    return produceState(ScheduleTimeSnapshot.now(clock), lifecycle, clock) {
+    val resolveZone = { zone ?: ZoneId.systemDefault() }
+    return produceState(ScheduleTimeSnapshot.now(clock, resolveZone()), lifecycle, clock, zone) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                value = ScheduleTimeSnapshot.now(clock)
-                delay(30_000)
+                val current = ScheduleTimeSnapshot.now(clock, resolveZone())
+                if (current.today != value.today ||
+                    current.minutes != value.minutes ||
+                    current.zone != value.zone
+                ) {
+                    value = current
+                }
+                delay(current.millisUntilNextMinute())
             }
         }
     }

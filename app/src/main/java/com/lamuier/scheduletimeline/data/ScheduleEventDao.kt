@@ -40,11 +40,8 @@ interface ScheduleEventDao {
     @Query("DELETE FROM schedule_events WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>)
 
-    @Query("UPDATE schedule_events SET category = '' WHERE category = :name")
-    suspend fun clearCategory(name: String)
-
-    @Query("UPDATE schedule_events SET team = '' WHERE team = :name")
-    suspend fun clearTeam(name: String)
+    @Query("SELECT * FROM schedule_events WHERE team LIKE '%' || :escapedQuery || '%' ESCAPE '\\'")
+    suspend fun findByTeamCandidate(escapedQuery: String): List<ScheduleEvent>
 
     @Query("UPDATE schedule_events SET linkedPerformanceId = NULL WHERE linkedPerformanceId = :id")
     suspend fun clearLinkedPerformance(id: Long)
@@ -84,17 +81,8 @@ interface ScheduleEventDao {
     suspend fun getMergeCandidates(): List<ScheduleEvent>
 
     @Query("SELECT DISTINCT dayKey FROM schedule_events ORDER BY dayKey ASC")
-    suspend fun distinctDayKeys(): List<String>
-
-    @Query("SELECT DISTINCT dayKey FROM schedule_events ORDER BY dayKey ASC")
     fun observeDayKeys(): Flow<List<String>>
 
     @Query("SELECT MIN(dayKey) FROM schedule_events WHERE dayKey >= :fromDayKey")
     suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String?
-
-    @Query(
-        "SELECT * FROM schedule_events WHERE linkedPerformanceId = :performanceId " +
-            "ORDER BY startMinutes ASC, endMinutes ASC",
-    )
-    suspend fun getByLinkedPerformance(performanceId: Long): List<ScheduleEvent>
 }

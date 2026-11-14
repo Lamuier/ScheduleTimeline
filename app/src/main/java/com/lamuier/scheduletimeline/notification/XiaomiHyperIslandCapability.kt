@@ -2,10 +2,9 @@ package com.lamuier.scheduletimeline.notification
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.net.Uri
 import android.os.Build
-import android.os.Bundle
 import android.provider.Settings
+import java.lang.reflect.Method
 
 data class XiaomiHyperIslandCapability(
     val isXiaomiDevice: Boolean,
@@ -33,17 +32,28 @@ data class XiaomiHyperIslandCapability(
 object XiaomiHyperIslandCapabilityReader {
     private const val PROTOCOL_SETTING = "notification_focus_protocol"
     private const val ISLAND_PROPERTY = "persist.sys.feature.island"
-    private const val FOCUS_URI = "content://miui.statusbar.notification.public"
 
-    fun inspect(context: Context): XiaomiHyperIslandCapability {
-        val appContext = context.applicationContext
-        val xiaomiDevice = isXiaomiDevice()
-        return XiaomiHyperIslandCapability(
-            isXiaomiDevice = xiaomiDevice,
-            protocol = if (xiaomiDevice) readProtocol(appContext) else 0,
-            islandFeatureEnabled = xiaomiDevice && readIslandFeature(),
-            focusPermissionGranted = xiaomiDevice && canShowFocus(appContext),
-        )
+    private val systemPropertiesClass: Class<*>? by lazy { loadSystemPropertiesClass() }
+
+    @SuppressLint("PrivateApi")
+    private fun loadSystemPropertiesClass(): Class<*>? =
+        runCatching { Class.forName("android.os.SystemProperties") }.getOrNull()
+
+    private val getBooleanMethod: Method? by lazy {
+        runCatching {
+            systemPropertiesClass?.getDeclaredMethod(
+                "getBoolean",
+                String::class.java,
+                Boolean::class.javaPrimitiveType,
+            )?.apply { isAccessible = true }
+        }.getOrNull()
+    }
+
+    private val getStringMethod: Method? by lazy {
+        runCatching {
+            systemPropertiesClass?.getDeclaredMethod("get", String::class.java)
+                ?.apply { isAccessible = true }
+        }.getOrNull()
     }
 
     fun isSupported(context: Context): Boolean = isXiaomiDevice() && readIslandFeature() &&
@@ -59,37 +69,20 @@ object XiaomiHyperIslandCapabilityReader {
         Settings.System.getInt(context.contentResolver, PROTOCOL_SETTING, 0)
     }.getOrDefault(0)
 
-    @SuppressLint("PrivateApi")
     private fun readIslandFeature(): Boolean {
-        return runCatching {
-            val systemProperties = Class.forName("android.os.SystemProperties")
-            val getBoolean = systemProperties.getDeclaredMethod(
-                "getBoolean",
-                String::class.java,
-                Boolean::class.javaPrimitiveType,
-            )
-            getBoolean.isAccessible = true
-            getBoolean.invoke(null, ISLAND_PROPERTY, false) as Boolean
-        }.getOrElse {
-            runCatching {
-                val systemProperties = Class.forName("android.os.SystemProperties")
-                val get = systemProperties.getDeclaredMethod("get", String::class.java)
-                get.isAccessible = true
-                when ((get.invoke(null, ISLAND_PROPERTY) as? String)?.trim()?.lowercase()) {
-                    "1", "true", "yes", "y", "on" -> true
-                    else -> false
-                }
-            }.getOrDefault(false)
+        val booleanMethod = getBooleanMethod
+        if (booleanMethod != null) {
+            val value = runCatching {
+                booleanMethod.invoke(null, ISLAND_PROPERTY, false) as? Boolean
+            }.getOrNull()
+            if (value != null) return value
         }
+        val stringMethod = getStringMethod ?: return false
+        return runCatching {
+            when ((stringMethod.invoke(null, ISLAND_PROPERTY) as? String)?.trim()?.lowercase()) {
+                "1", "true", "yes", "y", "on" -> true
+                else -> false
+            }
+        }.getOrDefault(false)
     }
-
-    private fun canShowFocus(context: Context): Boolean = runCatching {
-        val result = context.contentResolver.call(
-            Uri.parse(FOCUS_URI),
-            "canShowFocus",
-            null,
-            Bundle().apply { putString("package", context.packageName) },
-        )
-        result?.getBoolean("canShowFocus", false) == true
-    }.getOrDefault(false)
 }

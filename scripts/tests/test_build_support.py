@@ -90,6 +90,32 @@ class BuildSupportTests(unittest.TestCase):
         with self.assertRaises(build.BuildError):
             build.find_sdk(self.root, '/other', {}, 'Linux')
 
+    def test_escaped_local_properties_sdk_with_spaces_and_unicode(self):
+        self.assertEqual(
+            build._unescape_java_property(r'C\:\\users\\u0041\\\u4e2d\u6587\ sdk'),
+            'C:\\users\\u0041\\中文 sdk',
+        )
+        sdk = self.root / '中文 SDK' / 'u0041'
+        sdk.mkdir(parents=True)
+        sep = '\\\\' if '\\' in str(self.root) else '/'
+        escaped_root = str(self.root).replace('\\', '\\\\').replace(':', '\\:').replace(' ', '\\ ')
+        (self.root / 'local.properties').write_text(
+            f'sdk.dir={escaped_root}{sep}\\u4e2d\\u6587\\ SDK{sep}u0041\n',
+            encoding='utf-8',
+        )
+        self.assertEqual(build.find_sdk(self.root, None, {}, 'Windows'), sdk)
+
+    def test_raw_windows_local_properties_path_and_empty_sdk_dir(self):
+        self.assertTrue(build._is_raw_windows_path(r'C:\temp\new\u1234'))
+        self.assertFalse(build._is_raw_windows_path(r'C\:\\Android\\Sdk'))
+        sdk = self.root / 'temp' / 'new' / 'u1234'
+        sdk.mkdir(parents=True)
+        (self.root / 'local.properties').write_text('sdk.dir=' + str(sdk) + '\n', encoding='utf-8')
+        self.assertEqual(build.find_sdk(self.root, None, {}, 'Windows'), sdk)
+        (self.root / 'local.properties').write_text('sdk.dir=   \n', encoding='utf-8')
+        self.assertIsNone(build.property_sdk(self.root))
+        self.assertEqual(build.find_sdk(self.root, None, {'ANDROID_HOME': str(sdk)}, 'Windows'), sdk)
+
     def test_windows_sdk_tool_avoids_batch_command_interpolation(self):
         with patch.object(build.platform, 'system', return_value='Windows'):
             tools = self.root / 'tools with spaces'

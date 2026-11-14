@@ -19,5 +19,5 @@ function Invoke-TemplatePython {
         }
         return $code
     }
-    throw 'Python 3.9+ is required. Install Python and add it to PATH; see build.md.'
+    throw 'Python 3.9+ is required. Install Python and add it to PATH; see docs/technical.md.'
 }

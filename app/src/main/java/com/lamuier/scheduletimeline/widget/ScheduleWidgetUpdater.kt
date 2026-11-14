@@ -2,7 +2,6 @@ package com.lamuier.scheduletimeline.widget
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import android.net.Uri
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.BroadcastReceiver
@@ -13,17 +12,20 @@ import android.os.Build
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
+import androidx.core.net.toUri
 import com.lamuier.scheduletimeline.MainActivity
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.ScheduleApplication
 import com.lamuier.scheduletimeline.data.EventLabels
+import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.NotificationSnapshot
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.ScheduledEventWindow
 import com.lamuier.scheduletimeline.data.TimeFormat
+import com.lamuier.scheduletimeline.data.teamDisplay
 import com.lamuier.scheduletimeline.notification.BroadcastWork
+import java.lang.ref.WeakReference
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
@@ -46,11 +48,18 @@ object ScheduleWidgetUpdater {
     internal data class Targets(val small: List<Int>, val large: List<Int>) {
         val any: Boolean get() = small.isNotEmpty() || large.isNotEmpty()
     }
-    private data class ListContent(val today: LocalDate, val events: List<ScheduleEvent>, val config: String)
+    private data class ListItemContent(
+        val id: Long,
+        val startMinutes: Int,
+        val endMinutes: Int,
+        val displayTitle: String,
+        val type: EventType,
+    )
+    private data class ListContent(val today: LocalDate, val items: List<ListItemContent>, val config: String)
     private data class SummaryContent(val list: ListContent, val active: List<ScheduledEventWindow>,
         val next: ScheduledEventWindow?, val ids: List<Int>)
     private val mutex = Mutex()
-    private var lastContext: Context? = null
+    private var lastContext: WeakReference<Context>? = null
     private var lastSmall: SummaryContent? = null
     private var lastLarge: SummaryContent? = null
     private var lastList: Pair<ListContent, List<Int>>? = null
@@ -81,8 +90,8 @@ object ScheduleWidgetUpdater {
     internal suspend fun refresh(context: Context, allEvents: List<ScheduleEvent>,
         snapshot: NotificationSnapshot, targets: Targets, force: Boolean) = mutex.withLock {
         val appContext = context.applicationContext
-        if (lastContext !== appContext) {
-            lastContext = appContext
+        if (lastContext?.get() !== appContext) {
+            lastContext = WeakReference(appContext)
             lastSmall = null; lastLarge = null; lastList = null
         }
         if (!targets.any) {
@@ -96,7 +105,19 @@ object ScheduleWidgetUpdater {
         val windows = snapshot.windows.filter { it.event.dayKey == todayKey }
         val active = snapshot.active.filter { it.event.dayKey == todayKey }
         val next = windows.filter { it.startMillis > snapshot.nowMillis }.minByOrNull { it.startMillis }
-        val list = ListContent(today, events, appContext.resources.configuration.toString())
+        val list = ListContent(
+            today = today,
+            items = events.map {
+                ListItemContent(
+                    id = it.id,
+                    startMinutes = it.startMinutes,
+                    endMinutes = it.endMinutes,
+                    displayTitle = it.teamDisplay.ifBlank { it.title },
+                    type = EventType.fromStorage(it.eventType),
+                )
+            },
+            config = appContext.resources.configuration.toString(),
+        )
         val small = SummaryContent(list, active, next, targets.small)
         val large = SummaryContent(list, active, next, targets.large)
         if (targets.small.isEmpty()) lastSmall = null
@@ -181,7 +202,7 @@ object ScheduleWidgetUpdater {
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
             action = "${context.packageName}.OPEN_WIDGET_EVENT"
-            data = Uri.parse("schedule://widget/$eventId")
+            data = "schedule://widget/$eventId".toUri()
             putExtra(ScheduleWidgetProviderLarge.EXTRA_ITEM_EVENT_ID, eventId)
         }
         // 用事件 id 作 requestCode，避免不同事件的 PendingIntent 被系统合并
@@ -236,18 +257,7 @@ object ScheduleWidgetUpdater {
             next != null -> {
                 statusText = context.getString(R.string.widget_status_upcoming)
                 mainText = EventLabels.displayLabel(next.event)
-                val eventDate = runCatching { LocalDate.parse(next.event.dayKey) }.getOrDefault(today)
-                subText = if (eventDate == today) {
-                    TimeFormat.minutesToHm(next.event.startMinutes)
-                } else {
-                    val eventWeekday = eventDate.dayOfWeek
-                        .getDisplayName(TextStyle.SHORT, Locale.SIMPLIFIED_CHINESE)
-                    context.getString(
-                        R.string.widget_upcoming_later,
-                        eventWeekday,
-                        TimeFormat.minutesToHm(next.event.startMinutes),
-                    )
-                }
+                subText = TimeFormat.minutesToHm(next.event.startMinutes)
             }
 
             else -> {

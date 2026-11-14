@@ -26,13 +26,18 @@ object AppShortcuts {
     const val ACTION_IMPORT =
         "com.lamuier.scheduletimeline.action.IMPORT"
 
+    private const val ID_ADD_EVENT = "add_event"
+    private const val ID_TODAY = "today"
+    private const val ID_NEXT_SCHEDULED = "next_scheduled"
+    private const val ID_IMPORT = "import_csv"
+
     /** 每次进程启动刷新注册，保证标签 / 图标 / intent 与当前构建一致。 */
     fun register(context: Context) {
         val manager = context.getSystemService(ShortcutManager::class.java) ?: return
         manager.dynamicShortcuts = listOf(
             shortcut(
                 context = context,
-                id = "add_event",
+                id = ID_ADD_EVENT,
                 shortLabelRes = R.string.shortcut_add_short,
                 longLabelRes = R.string.shortcut_add_long,
                 iconRes = R.drawable.ic_shortcut_add,
@@ -40,7 +45,7 @@ object AppShortcuts {
             ),
             shortcut(
                 context = context,
-                id = "today",
+                id = ID_TODAY,
                 shortLabelRes = R.string.shortcut_today_short,
                 longLabelRes = R.string.shortcut_today_long,
                 iconRes = R.drawable.ic_shortcut_today,
@@ -48,7 +53,7 @@ object AppShortcuts {
             ),
             shortcut(
                 context = context,
-                id = "next_scheduled",
+                id = ID_NEXT_SCHEDULED,
                 shortLabelRes = R.string.shortcut_next_short,
                 longLabelRes = R.string.shortcut_next_long,
                 iconRes = R.drawable.ic_shortcut_next,
@@ -56,13 +61,25 @@ object AppShortcuts {
             ),
             shortcut(
                 context = context,
-                id = "import_csv",
+                id = ID_IMPORT,
                 shortLabelRes = R.string.shortcut_import_short,
                 longLabelRes = R.string.shortcut_import_long,
                 iconRes = R.drawable.ic_shortcut_import,
                 action = ACTION_IMPORT,
             ),
         )
+    }
+
+    /** 上报用户从桌面长按触发快捷方式，供启动器排序与满足 Android Lint `ReportShortcutUsage`。 */
+    fun reportUsed(context: Context, action: String?) {
+        val id = when (action) {
+            ACTION_ADD_EVENT -> ID_ADD_EVENT
+            ACTION_TODAY -> ID_TODAY
+            ACTION_NEXT_SCHEDULED -> ID_NEXT_SCHEDULED
+            ACTION_IMPORT -> ID_IMPORT
+            else -> return
+        }
+        context.getSystemService(ShortcutManager::class.java)?.reportShortcutUsed(id)
     }
 
     private fun shortcut(

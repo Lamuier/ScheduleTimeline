@@ -24,7 +24,7 @@
             android:ellipsize="end"
             android:singleLine="true"
             android:textColor="@color/widget_primary"
-            android:textSize="10sp"
+            android:textSize="11sp"
             android:textStyle="bold"
             tools:text="追程" />
 
@@ -37,7 +37,7 @@
             android:gravity="end"
             android:singleLine="true"
             android:textColor="@color/widget_on_surface_variant"
-            android:textSize="10sp"
+            android:textSize="11sp"
             tools:text="2026年08月09日 周日" />
     </LinearLayout>
 

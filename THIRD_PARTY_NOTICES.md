@@ -9,12 +9,12 @@
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
 | androidx.core:core-ktx | 1.15.0 | 核心工具库 |
-| androidx.lifecycle（runtime / runtime-compose / viewmodel-compose） | 2.8.7 | 生命周期与 ViewModel |
+| androidx.lifecycle（runtime-ktx / runtime-compose / viewmodel-compose） | 2.8.7 | 生命周期与 ViewModel |
 | androidx.activity:activity-compose | 1.9.3 | Compose 宿主 Activity |
-| androidx.compose（BOM 2024.12.01：ui、ui-graphics、material3、material-icons-core） | — | UI 框架与 Material 3 |
+| androidx.compose（ui、ui-graphics、ui-tooling-preview、material3、material-icons-core） | BOM 2026.08.00 | UI 框架与 Material 3 |
 | androidx.navigation:navigation-compose | 2.8.5 | 页面导航 |
-| androidx.room（runtime / ktx，编译期 KSP 生成代码） | 2.8.4 | 本地数据库 |
-| org.jetbrains.kotlin:kotlin-stdlib（Kotlin 2.3.10） | — | Kotlin 标准库，版权所有 © JetBrains s.r.o. |
+| androidx.room（room-runtime / room-ktx，编译期 KSP 生成代码） | 2.8.4 | 本地数据库 |
+| org.jetbrains.kotlin:kotlin-stdlib | 2.3.10 | Kotlin 标准库，版权所有 © JetBrains s.r.o. |
 
 Apache License 2.0 全文：<https://www.apache.org/licenses/LICENSE-2.0>
 
@@ -23,8 +23,13 @@ Apache License 2.0 全文：<https://www.apache.org/licenses/LICENSE-2.0>
 | 组件 | 版本 | 许可证 |
 | --- | --- | --- |
 | junit:junit | 4.13.2 | Eclipse Public License 1.0，© JUnit contributors |
+| org.robolectric:robolectric | 4.17 | MIT License，© Robolectric contributors |
+| androidx.test:core | 1.7.0 | Apache License 2.0，© The Android Open Source Project |
+| androidx.compose.ui（ui-test-junit4 / ui-test-manifest / ui-tooling） | BOM 2026.08.00 | Apache License 2.0，© The Android Open Source Project |
+| org.jetbrains.kotlinx:kotlinx-coroutines-test | 1.10.2 | Apache License 2.0，© JetBrains s.r.o. |
 | org.json:json | 20240303 | JSON.org License（公有领域风格），© JSON.org |
 | com.android.tools.build:gradle（AGP） | 9.2.1 | Apache License 2.0 |
+| org.jetbrains.kotlin.plugin.compose | 2.3.10 | Apache License 2.0，© JetBrains s.r.o. |
 | com.google.devtools.ksp | 2.3.10 | Apache License 2.0 |
 | org.gradle.toolchains.foojay-resolver-convention | 0.10.0 | Apache License 2.0 |
 | Gradle | 9.4.1 | Apache License 2.0，© Gradle Inc. |

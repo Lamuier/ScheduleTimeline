@@ -256,4 +256,55 @@ class ScheduleExportTest {
         assertEquals(12L, hint.daysAway)
         assertFalse(hint.isFuture)
     }
+
+    @Test
+    fun parseImport_mapsEnglishEventTypesCaseInsensitively() {
+        val csv = """
+            ${ScheduleExport.IMPORT_HEADER}
+            2026-06-01, TeamUpperTokuten, TOKUTEN, 前特, , 摊位1, 12:00, 13:00, , 是
+            2026-06-01, TeamLowerTokuten, tokuten, , , 摊位2, 13:30, 14:30, , 
+            2026-06-01, TeamUpperPerf, PERFORMANCE, , , 主舞台, 15:00, 15:30, , 是
+            2026-06-01, TeamLowerPerf, performance, , , 副舞台, 16:00, 16:30, , 
+        """.trimIndent()
+
+        val result = ScheduleExport.parseImportResult(csv, fallbackDayKey = "2026-06-01")
+        assertTrue(result.issues.isEmpty())
+        assertEquals(4, result.drafts.size)
+
+        val events = result.drafts.map { it.event }
+        assertEquals(EventType.TOKUTEN.storage, events[0].eventType)
+        assertEquals(TokutenKind.PRE.storage, events[0].tokutenKind)
+        assertTrue(events[0].completed)
+
+        assertEquals(EventType.TOKUTEN.storage, events[1].eventType)
+        assertEquals(TokutenKind.PARALLEL.storage, events[1].tokutenKind)
+        assertFalse(events[1].completed)
+
+        assertEquals(EventType.PERFORMANCE.storage, events[2].eventType)
+        assertEquals("", events[2].tokutenKind)
+        assertFalse(events[2].completed)
+
+        assertEquals(EventType.PERFORMANCE.storage, events[3].eventType)
+        assertEquals("", events[3].tokutenKind)
+        assertFalse(events[3].completed)
+    }
+
+    @Test
+    fun parseImport_stripsUtf8BomWithAndWithoutHeader() {
+        val withHeader = "\uFEFF${ScheduleExport.IMPORT_HEADER}\n" +
+            "2026-06-01, StarDiary, TOKUTEN, 平特, , 吧台A, 17:00, 19:00, , "
+        val headerResult = ScheduleExport.parseImportResult(withHeader, fallbackDayKey = "2026-06-01")
+        assertTrue(headerResult.issues.isEmpty())
+        assertEquals(1, headerResult.drafts.size)
+        assertEquals("2026-06-01", headerResult.drafts.single().event.dayKey)
+        assertEquals(EventType.TOKUTEN.storage, headerResult.drafts.single().event.eventType)
+
+        val withoutHeader = "\uFEFF\"2026-06-02\", StarCandy, performance, , , 主舞台, 18:00, 18:30, , "
+        val rowResult = ScheduleExport.parseImportResult(withoutHeader, fallbackDayKey = "2026-06-01")
+        assertTrue(rowResult.issues.isEmpty())
+        assertEquals(1, rowResult.drafts.size)
+        assertEquals("2026-06-02", rowResult.drafts.single().event.dayKey)
+        assertEquals("StarCandy", rowResult.drafts.single().event.team)
+        assertEquals(EventType.PERFORMANCE.storage, rowResult.drafts.single().event.eventType)
+    }
 }

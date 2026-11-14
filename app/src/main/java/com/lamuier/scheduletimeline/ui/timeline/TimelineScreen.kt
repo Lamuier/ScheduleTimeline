@@ -52,17 +52,17 @@ fun TimelineScreen(
     onOpenImportConsumed: () -> Unit = {},
     clock: java.time.Clock = java.time.Clock.systemUTC(),
 ) {
-    val dayState by viewModel.dayState.collectAsStateWithLifecycle()
     val currentDate by viewModel.currentDate.collectAsStateWithLifecycle()
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showManageSheet by remember { mutableStateOf(false) }
     // shortcut 直达导入：面板打开时是否停在导入步骤，关闭后复位
     var manageOpenAtImport by remember { mutableStateOf(false) }
-    var selectedEvent by remember { mutableStateOf<TimelineItem.Event?>(null) }
+    var selectedEvent by remember { mutableStateOf<SelectedEventDetail?>(null) }
 
     LaunchedEffect(requestOpenImport) {
         if (requestOpenImport) {
+            viewModel.clearWriteError()
             showManageSheet = true
             manageOpenAtImport = true
             onOpenImportConsumed()
@@ -153,7 +153,15 @@ fun TimelineScreen(
                     navigateToDate(from.plusDays(1), true)
                 },
                 onSelectDate = { showDatePicker = true },
-                onManage = { viewModel.changeDate(dateForPage(pagerState.currentPage)); showManageSheet = true },
+                onManage = {
+                    val pageDate = dateForPage(pagerState.currentPage)
+                    wasScrolling = false
+                    navigationJob?.cancel()
+                    requestedDate = pageDate
+                    viewModel.changeDate(pageDate)
+                    viewModel.clearWriteError()
+                    showManageSheet = true
+                },
             )
         },
     ) { padding ->
@@ -190,7 +198,10 @@ fun TimelineScreen(
                             navigateToDate(it, false)
                         }
                     },
-                    onSelectEvent = { viewModel.clearWriteError(); selectedEvent = it },
+                    onSelectEvent = {
+                        viewModel.clearWriteError()
+                        selectedEvent = SelectedEventDetail(it, pageDate)
+                    },
                 )
             }
 
@@ -218,7 +229,14 @@ fun TimelineScreen(
             }
 
             FloatingActionButton(
-                onClick = { viewModel.changeDate(dateForPage(pagerState.currentPage)); onAdd() },
+                onClick = {
+                    val pageDate = dateForPage(pagerState.currentPage)
+                    wasScrolling = false
+                    navigationJob?.cancel()
+                    requestedDate = pageDate
+                    viewModel.changeDate(pageDate)
+                    onAdd()
+                },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(16.dp),
@@ -263,34 +281,42 @@ fun TimelineScreen(
             onDismiss = {
                 showManageSheet = false
                 manageOpenAtImport = false
+                viewModel.clearWriteError()
             },
             openAtImport = manageOpenAtImport,
         )
     }
 
     val detailWriteState by viewModel.writeState.collectAsStateWithLifecycle()
-    selectedEvent?.let { event ->
+    selectedEvent?.let { selected ->
+        val detailDayState by rememberDayState(viewModel, selected.date)
+            .collectAsStateWithLifecycle()
         EventDetailSheet(
-            item = event,
-            events = dayState.events,
+            item = selected.item,
+            events = detailDayState.events,
             busy = detailWriteState.busy,
             failed = detailWriteState.failed,
             onEdit = {
-                val id = event.event.id
+                val id = selected.item.event.id
                 selectedEvent = null
                 onEditEvent(id)
             },
             onCompleteTokuten = {
-                val id = event.event.id
+                val id = selected.item.event.id
                 viewModel.completeTokuten(id) { selectedEvent = null }
             }.takeIf {
-                EventType.fromStorage(event.event.eventType) == EventType.TOKUTEN &&
-                    !event.event.completed
+                EventType.fromStorage(selected.item.event.eventType) == EventType.TOKUTEN &&
+                    !selected.item.event.completed
             },
             onDismiss = { selectedEvent = null; viewModel.clearWriteError() },
         )
     }
 }
+
+private data class SelectedEventDetail(
+    val item: TimelineItem.Event,
+    val date: LocalDate,
+)
 
 private const val DAY_PAGE_COUNT = 20_000
 private const val DAY_PAGE_CENTER = DAY_PAGE_COUNT / 2
@@ -306,7 +332,6 @@ private fun DayPage(
 ) {
     val pageItems = state.items
     val pageStats = state.stats
-    val events = state.events
 
     Column(modifier = Modifier.fillMaxSize().testTag("day-page-${state.date}")) {
         if (isToday && nowMinutes != null) {
@@ -335,7 +360,6 @@ private fun DayPage(
         } else {
             TimelineList(
                 items = pageItems,
-                events = events,
                 nowMinutes = nowMinutes,
                 onSelectEvent = onSelectEvent,
             )

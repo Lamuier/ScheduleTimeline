@@ -27,7 +27,6 @@ import com.lamuier.scheduletimeline.data.EventType
 import com.lamuier.scheduletimeline.data.ScheduleEvent
 import com.lamuier.scheduletimeline.data.ThemeMode
 import com.lamuier.scheduletimeline.data.TokutenKind
-import kotlin.math.abs
 
 // ---- 品牌色 ----
 val PurpleTime = Color(0xFF7C5CFC)
@@ -58,23 +57,6 @@ private val CategoryPalette = listOf(
     // 红
     CategoryColors(Color(0xFFEF4444), Color(0xFFFDE4E4), Color(0xFF8C2222)),
 )
-
-/** 常见分类固定配色，其余分类按名称哈希稳定取色。 */
-private val FixedCategoryIndex = mapOf(
-    "舞台演出" to 0,
-    "特典" to 2,
-    "物贩" to 4,
-    "签售" to 1,
-    "抽选" to 5,
-)
-
-fun categoryColors(category: String): CategoryColors {
-    val key = category.trim()
-    if (key.isEmpty()) return CategoryPalette[5]
-    val fixed = FixedCategoryIndex[key]
-    val index = fixed ?: (abs(key.hashCode()) % CategoryPalette.size)
-    return CategoryPalette[index]
-}
 
 fun eventTypeColors(type: EventType): CategoryColors = when (type) {
     EventType.PERFORMANCE -> CategoryPalette[0]

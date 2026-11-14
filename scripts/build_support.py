@@ -76,17 +76,42 @@ def app_config(root):
     return result
 
 
+def _unescape_java_property(value):
+    """Unescape Java .properties sequences in a single pass so \\\\uXXXX stays literal."""
+    def replace(match):
+        token = match.group(1)
+        if token.startswith("u") and len(token) == 5:
+            return chr(int(token[1:], 16))
+        return {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}.get(token, token)
+
+    return re.sub(r"\\(u[0-9a-fA-F]{4}|.)", replace, value)
+
+
+def _is_raw_windows_path(value):
+    """Detect unescaped Windows drive paths (e.g. C:\\Android\\Sdk) written manually."""
+    if "\\\\" in value or re.search(r"\\[:= ]", value):
+        return False
+    return bool(re.match(r"^[A-Za-z]:\\(?:[^\\]|$)", value))
+
+
 def property_sdk(root):
     path = root / "local.properties"
     if not path.is_file():
         return None
-    match = re.search(r"^\s*sdk\.dir\s*[:=]\s*(.*?)\s*$", path.read_text(encoding="utf-8"), re.M)
-    if not match:
+    matches = re.findall(r"^\s*sdk\.dir\s*[:=]\s*(.*?)\s*$", path.read_text(encoding="utf-8-sig"), re.M)
+    if not matches:
         return None
-    # Android Studio writes Java-properties escaping (spaces, colons, backslashes).
-    value = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), match.group(1))
-    value = re.sub(r"\\(.)", r"\1", value)
-    return resolve_path(value, root)
+    raw = matches[-1]
+    if not raw:
+        return None
+    # Android Studio writes Java-properties escaping, while manual configs or tests may use raw Windows paths.
+    value = raw if _is_raw_windows_path(raw) else _unescape_java_property(raw)
+    sdk = resolve_path(value, root)
+    if not sdk.is_dir():
+        raw_sdk = resolve_path(raw, root)
+        if raw_sdk.is_dir():
+            return raw_sdk
+    return sdk
 
 
 def find_sdk(root, explicit, env, host):

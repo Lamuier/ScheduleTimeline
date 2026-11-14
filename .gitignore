@@ -75,6 +75,9 @@ out/
 *.orig
 *.swp
 hs_err_pid*
+replay_pid*
+screen_*.png
+.adb_tmp/
 
 # ---- Test / coverage ----
 coverage/

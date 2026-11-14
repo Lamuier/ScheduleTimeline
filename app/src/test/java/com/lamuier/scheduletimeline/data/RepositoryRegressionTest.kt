@@ -105,4 +105,50 @@ class RepositoryRegressionTest {
         repository.deleteTeam("B")
         assertEquals(listOf("A"), repository.get(merged.id)!!.teamNames)
     }
+
+    @Test fun firstDayKeyAndObserveDayKeysPrepareLegacyDefaultRowsOnColdStart() = runBlocking {
+        val today = java.time.LocalDate.now().toString()
+        database.scheduleEventDao().upsert(event("Legacy").copy(dayKey = "default"))
+
+        val freshRepo = ScheduleRepository(database)
+        assertEquals(today, freshRepo.firstDayKeyOnOrAfter(today))
+        assertEquals(listOf(today), freshRepo.observeDayKeys().first())
+        assertEquals(1, freshRepo.eventsForDay(today).size)
+    }
+
+    @Test fun deleteTeamUsesExactTeamMatchAcrossSubstringsAndLikeWildcards() = runBlocking {
+        val starId = repository.save(event("Star").copy(startMinutes = 600, endMinutes = 620))
+        val starDiaryId = repository.save(event("StarDiary").copy(startMinutes = 630, endMinutes = 650))
+        val multiId = repository.save(
+            event(TeamNames.encode(listOf("Star", "MyStar"))).copy(startMinutes = 660, endMinutes = 680),
+        )
+        val pctId = repository.save(event("100%").copy(startMinutes = 700, endMinutes = 720))
+        val pctOtherId = repository.save(event("100A").copy(startMinutes = 730, endMinutes = 750))
+        val underId = repository.save(event("A_B").copy(startMinutes = 760, endMinutes = 780))
+        val underOtherId = repository.save(event("AXB").copy(startMinutes = 790, endMinutes = 810))
+
+        repository.deleteTeam("Star")
+        assertEquals(emptyList<String>(), repository.get(starId)!!.teamNames)
+        assertEquals(listOf("StarDiary"), repository.get(starDiaryId)!!.teamNames)
+        assertEquals(listOf("MyStar"), repository.get(multiId)!!.teamNames)
+
+        repository.deleteTeam("100%")
+        assertEquals(emptyList<String>(), repository.get(pctId)!!.teamNames)
+        assertEquals(listOf("100A"), repository.get(pctOtherId)!!.teamNames)
+
+        repository.deleteTeam("A_B")
+        assertEquals(emptyList<String>(), repository.get(underId)!!.teamNames)
+        assertEquals(listOf("AXB"), repository.get(underOtherId)!!.teamNames)
+    }
+
+    @Test fun saveMergesIntoExistingKeeperAndReturnsSurvivingId() = runBlocking {
+        val firstId = repository.save(event("A").copy(title = "一场"))
+        val returnedId = repository.save(event("B").copy(title = "二场"))
+
+        assertEquals(firstId, returnedId)
+        val merged = repository.get(firstId)!!
+        assertEquals(listOf("A", "B"), merged.teamNames)
+        assertEquals("一场 / 二场", merged.title)
+        assertEquals(listOf("A", "B"), database.categoryDao().observeAll().first().map { it.name })
+    }
 }

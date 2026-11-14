@@ -158,7 +158,6 @@ private fun rememberRegularTextMetrics(): TimelineTextMetrics {
 @Composable
 internal fun TimelineList(
     items: List<TimelineItem>,
-    events: List<ScheduleEvent> = emptyList(),
     nowMinutes: Int? = null,
     onSelectEvent: (TimelineItem.Event) -> Unit,
 ) {
@@ -527,7 +526,7 @@ internal fun TimelineNode(
     val dark = LocalDarkTheme.current
     val axisText = rememberAxisTextMetrics()
     val secondaryColor = MaterialTheme.colorScheme.secondary
-        val nodeColor = remember(item, dark) {
+    val nodeColor = remember(item, dark, secondaryColor) {
         when (item) {
             is TimelineItem.Event -> eventTypeColors(item.event).adaptTo(dark).accent
             is TimelineItem.OverlapGroup -> eventTypeColors(item.events.first().event).adaptTo(dark).accent
@@ -1024,9 +1023,9 @@ private fun OverlapSlice(
     items: List<TimelineItem.Event>,
     startMinutes: Int,
     endMinutes: Int,
-    nowMinutes: Int? = null,
     onSelectEvent: (TimelineItem.Event) -> Unit,
     modifier: Modifier = Modifier,
+    nowMinutes: Int? = null,
     timeLines: Int = 2,
     inProgress: Boolean = nowMinutes != null &&
         nowMinutes in startMinutes until endMinutes &&
@@ -1093,7 +1092,16 @@ private fun OverlapSlice(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                itemsIndexed(items) { _, item ->
+                itemsIndexed(
+                    items = items,
+                    key = { index, item ->
+                        if (item.event.id != 0L) {
+                            "slice-${item.event.id}"
+                        } else {
+                            "slice-idx-$index-${item.event.startMinutes}-${item.event.endMinutes}-${item.event.team}"
+                        }
+                    },
+                ) { _, item ->
                     val event = item.event
                     val colors = eventTypeColors(event).adaptTo(dark)
                     val cardAlpha = if (event.completed) 0.62f else 1f
@@ -1132,8 +1140,8 @@ private fun OverlapSlice(
 @Composable
 private fun GapCard(
     item: TimelineItem.Gap,
-    nowMinutes: Int? = null,
     modifier: Modifier = Modifier,
+    nowMinutes: Int? = null,
 ) {
     val inProgress = nowMinutes != null && nowMinutes in item.startMinutes until item.endMinutes
     val progressFraction = if (inProgress && item.endMinutes > item.startMinutes) {

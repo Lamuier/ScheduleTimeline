@@ -31,9 +31,13 @@ class ScheduleRepository(
     /** 删除团队候选，并从所有事件的团队集合中移除同名团队。 */
     suspend fun deleteTeam(name: String) {
         database.withTransaction {
-            val changedEvents = eventDao.getAll().mapNotNull { event ->
-                val nextTeam = TeamNames.encode(event.teamNames.filterNot { it == name })
-                event.copy(team = nextTeam).takeIf { nextTeam != event.team }
+            val changedEvents = if (name.isBlank()) {
+                emptyList()
+            } else {
+                eventDao.findByTeamCandidate(escapeLikeQuery(name)).mapNotNull { event ->
+                    val nextTeam = TeamNames.encode(event.teamNames.filterNot { it == name })
+                    event.copy(team = nextTeam).takeIf { nextTeam != event.team }
+                }
             }
             if (changedEvents.isNotEmpty()) {
                 eventDao.updateAll(changedEvents)
@@ -42,31 +46,32 @@ class ScheduleRepository(
         }
     }
 
-    @Deprecated("Use deleteTeam", ReplaceWith("deleteTeam(name)"))
-    suspend fun deleteCategory(name: String) = deleteTeam(name)
-
     suspend fun get(id: Long): ScheduleEvent? = eventDao.getById(id)
 
     suspend fun save(event: ScheduleEvent): Long {
         return database.withTransaction {
             val current = if (event.id == 0L) null else checkNotNull(eventDao.getById(event.id))
             val normalized = normalizeEvent(event).let {
-                if (current == null) it else it.copy(completed =
-                    it.eventType == EventType.TOKUTEN.storage && current.completed)
+                if (current == null) it else it.copy(
+                    completed = it.eventType == EventType.TOKUTEN.storage && current.completed,
+                )
             }
-            saveTeamCategories(listOf(normalized))
             val id = if (normalized.id == 0L) {
                 eventDao.upsert(normalized)
             } else {
                 eventDao.update(normalized)
                 normalized.id
             }
-            val saved = eventDao.getById(id) ?: normalized.copy(id = id)
-            applyMerge(eventDao.getByDay(saved.dayKey))
-            eventDao.getByDay(saved.dayKey)
-                .firstOrNull { EventMerge.slotOf(it) == EventMerge.slotOf(saved) }
-                ?.id
-                ?: id
+            val saved = normalized.copy(id = id)
+            val dayEvents = eventDao.getByDay(saved.dayKey)
+            val plan = EventMerge.plan(dayEvents)
+            val teamNamesToSave = buildList {
+                addAll(saved.teamNames)
+                plan.updates.forEach { addAll(it.teamNames) }
+            }
+            saveTeamNames(teamNamesToSave)
+            applyPlan(plan)
+            survivingIdFor(dayEvents, plan, saved)
         }
     }
 
@@ -74,9 +79,9 @@ class ScheduleRepository(
         if (events.isEmpty()) return
         database.withTransaction {
             val normalized = events.map(::normalizeEvent)
-            saveTeamCategories(normalized)
+            val savedTeams = saveTeamCategories(normalized)
             eventDao.upsertAll(normalized)
-            mergeDays(normalized.map { it.dayKey })
+            mergeDays(normalized.map { it.dayKey }, savedTeams)
         }
     }
 
@@ -85,9 +90,9 @@ class ScheduleRepository(
         if (drafts.isEmpty()) return
         database.withTransaction {
             val events = drafts.map { normalizeEvent(it.event.copy(id = 0)) }
-            saveTeamCategories(events)
+            val savedTeams = saveTeamCategories(events)
             eventDao.upsertAll(events)
-            mergeDays(events.map { it.dayKey })
+            mergeDays(events.map { it.dayKey }, savedTeams)
         }
     }
 
@@ -131,16 +136,16 @@ class ScheduleRepository(
         return eventDao.getAll()
     }
 
-    suspend fun distinctDayKeys(): List<String> = eventDao.distinctDayKeys()
-
     fun observeDayKeys(): Flow<List<String>> = flow {
         ensureScheduleReady()
         emitAll(eventDao.observeDayKeys().distinctUntilChanged())
     }
 
     /** 从指定日期（含当日）起第一个有日程的 dayKey；无则 null。 */
-    suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String? =
-        eventDao.firstDayKeyOnOrAfter(fromDayKey)
+    suspend fun firstDayKeyOnOrAfter(fromDayKey: String): String? {
+        ensureScheduleReady()
+        return eventDao.firstDayKeyOnOrAfter(fromDayKey)
+    }
 
     /**
      * 遗留 dayKey 迁移，并合并已有的同时段同类型日程。
@@ -163,16 +168,31 @@ class ScheduleRepository(
         }
     }
 
-    private suspend fun mergeDays(dayKeys: Collection<String>) {
+    private suspend fun mergeDays(
+        dayKeys: Collection<String>,
+        alreadySavedTeams: Set<String> = emptySet(),
+    ) {
         dayKeys.distinct().forEach { dayKey ->
-            applyMerge(eventDao.getByDay(dayKey))
+            applyMerge(eventDao.getByDay(dayKey), alreadySavedTeams)
         }
     }
 
-    private suspend fun applyMerge(events: List<ScheduleEvent>) {
+    private suspend fun applyMerge(
+        events: List<ScheduleEvent>,
+        alreadySavedTeams: Set<String> = emptySet(),
+    ) {
         val plan = EventMerge.plan(events)
         if (plan.updates.isNotEmpty()) {
-            saveTeamCategories(plan.updates)
+            val extraTeams = plan.updates
+                .flatMap { it.teamNames }
+                .filterNot { it in alreadySavedTeams }
+            saveTeamNames(extraTeams)
+        }
+        applyPlan(plan)
+    }
+
+    private suspend fun applyPlan(plan: EventMerge.Plan) {
+        if (plan.updates.isNotEmpty()) {
             eventDao.updateAll(plan.updates)
         }
         if (plan.deleteIds.isNotEmpty()) {
@@ -181,19 +201,45 @@ class ScheduleRepository(
         }
     }
 
+    private fun survivingIdFor(
+        dayEvents: List<ScheduleEvent>,
+        plan: EventMerge.Plan,
+        saved: ScheduleEvent,
+    ): Long {
+        val targetSlot = EventMerge.slotOf(saved)
+        val updatesById = plan.updates.associateBy { it.id }
+        return dayEvents
+            .asSequence()
+            .filterNot { it.id in plan.deleteIds }
+            .map { updatesById[it.id] ?: it }
+            .firstOrNull { EventMerge.slotOf(it) == targetSlot }
+            ?.id
+            ?: saved.id
+    }
+
     private fun normalizeEvent(event: ScheduleEvent): ScheduleEvent {
         require(event.hasValidTime) { "Invalid event time" }
         require(ScheduleExport.parseDayKey(event.dayKey) != null) { "Invalid event date" }
         return event.copy(team = TeamNames.encode(event.teamNames), linkedPerformanceId = null)
     }
 
-    private suspend fun saveTeamCategories(events: List<ScheduleEvent>) {
-        val categories = events
-            .flatMap { it.teamNames }
-            .distinct()
-            .map(::Category)
+    private suspend fun saveTeamCategories(events: List<ScheduleEvent>): Set<String> {
+        val distinctTeams = events.flatMap { it.teamNames }.distinct()
+        saveTeamNames(distinctTeams)
+        return distinctTeams.toSet()
+    }
+
+    private suspend fun saveTeamNames(names: Iterable<String>) {
+        val categories = names.distinct().map(::Category)
         if (categories.isNotEmpty()) {
             categoryDao.insertAll(categories)
+        }
+    }
+
+    private fun escapeLikeQuery(value: String): String = buildString(value.length) {
+        for (ch in value) {
+            if (ch == '\\' || ch == '%' || ch == '_') append('\\')
+            append(ch)
         }
     }
 }

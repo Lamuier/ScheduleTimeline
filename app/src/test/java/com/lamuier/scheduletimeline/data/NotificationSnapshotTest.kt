@@ -24,13 +24,13 @@ class NotificationSnapshotTest {
                 val previous = ReminderState(keys.filterIndexed { i, _ -> i % 2 == 0 }.toSet(),
                     keys.filterIndexed { i, _ -> i % 5 == 0 }.toSet())
                 val snapshot = NotificationSchedule.snapshot(events, now, zone)
-                assertEquals(NotificationSchedule.activeAt(events, now, zone), snapshot.active)
-                assertEquals(NotificationSchedule.nextWindowAfter(events, now, zone), snapshot.next)
-                assertEquals(NotificationSchedule.nextBoundaryAfter(events, now, zone), snapshot.nextBoundary)
+                assertEquals(ReferenceNotificationSchedule.activeAt(events, now, zone), snapshot.active)
+                assertEquals(ReferenceNotificationSchedule.nextWindowAfter(events, now, zone), snapshot.next)
+                assertEquals(ReferenceNotificationSchedule.nextBoundaryAfter(events, now, zone), snapshot.nextBoundary)
                 assertEquals(ReferenceReminderPlanner.plan(events, now, zone, previous), ReminderPlanner.plan(snapshot, previous))
                 for (notifications in listOf(false, true)) for (widgets in listOf(false, true)) {
-                    val boundary = if (notifications) NotificationSchedule.nextRefreshAt(events, now, zone, 5000)
-                        else NotificationSchedule.nextBoundaryAfter(events, now, zone)
+                    val boundary = if (notifications) ReferenceNotificationSchedule.nextRefreshAt(events, now, zone, 5000)
+                        else ReferenceNotificationSchedule.nextBoundaryAfter(events, now, zone)
                     val midnight = if (widgets) Instant.ofEpochMilli(now).atZone(zone).toLocalDate().plusDays(1)
                         .atStartOfDay(zone).toInstant().toEpochMilli() else null
                     val expected = if (!notifications && !widgets) null else listOfNotNull(boundary, midnight).minOrNull()
@@ -38,6 +38,30 @@ class NotificationSnapshotTest {
                 }
             }
         }
+    }
+}
+
+private object ReferenceNotificationSchedule {
+    fun activeAt(events: List<ScheduleEvent>, nowMillis: Long, zone: ZoneId): List<ScheduledEventWindow> =
+        NotificationSchedule.windows(events, zone)
+            .filter { nowMillis in it.startMillis until it.endMillis }
+            .sortedBy { it.startMillis }
+
+    fun nextBoundaryAfter(events: List<ScheduleEvent>, nowMillis: Long, zone: ZoneId): Long? =
+        NotificationSchedule.windows(events, zone)
+            .flatMap { listOf(it.startMillis, it.endMillis) }
+            .filter { it > nowMillis }
+            .minOrNull()
+
+    fun nextWindowAfter(events: List<ScheduleEvent>, nowMillis: Long, zone: ZoneId): ScheduledEventWindow? =
+        NotificationSchedule.windows(events, zone)
+            .filter { it.startMillis > nowMillis }
+            .minByOrNull { it.startMillis }
+
+    fun nextRefreshAt(events: List<ScheduleEvent>, nowMillis: Long, zone: ZoneId, intervalMs: Long): Long? {
+        val boundary = nextBoundaryAfter(events, nowMillis, zone)
+        val hasActive = activeAt(events, nowMillis, zone).isNotEmpty()
+        return if (hasActive) listOfNotNull(boundary, nowMillis + intervalMs).minOrNull() else boundary
     }
 }
 

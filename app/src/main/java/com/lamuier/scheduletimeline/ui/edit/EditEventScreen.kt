@@ -58,6 +58,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.ScheduleViewModel
@@ -80,38 +81,14 @@ fun EditEventScreen(
     val state by viewModel.editUiState.collectAsStateWithLifecycle()
     val writeState by viewModel.writeState.collectAsStateWithLifecycle()
     val teams by viewModel.teams.collectAsStateWithLifecycle()
+    val viewModelDirty by viewModel.isEditDirty.collectAsStateWithLifecycle()
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var pickingStart by remember { mutableStateOf(false) }
     var pickingEnd by remember { mutableStateOf(false) }
     var teamToDelete by remember { mutableStateOf<String?>(null) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
 
-    var initialLoadedState by remember(sessionId) { mutableStateOf<EditUiState?>(null) }
-    LaunchedEffect(state.sessionId, state.error) {
-        if (state.sessionId == sessionId && state.error != EditValidationError.Loading && initialLoadedState == null) {
-            initialLoadedState = state
-        }
-    }
-
-    val isDirty by remember(state, initialLoadedState) {
-        androidx.compose.runtime.derivedStateOf {
-            val initial = initialLoadedState
-            if (initial == null) {
-                state.teamNames.isNotEmpty() || state.teamInput.isNotBlank() ||
-                    state.title.isNotBlank() || state.location.isNotBlank() || state.note.isNotBlank()
-            } else {
-                state.teamNames != initial.teamNames ||
-                    state.teamInput != initial.teamInput ||
-                    state.eventType != initial.eventType ||
-                    state.tokutenKind != initial.tokutenKind ||
-                    state.title != initial.title ||
-                    state.location != initial.location ||
-                    state.startMinutes != initial.startMinutes ||
-                    state.endMinutes != initial.endMinutes ||
-                    state.note != initial.note
-            }
-        }
-    }
+    val isDirty = state.sessionId == sessionId && viewModelDirty
 
     val requestBack = {
         if (!writeState.busy) {
@@ -123,8 +100,10 @@ fun EditEventScreen(
         }
     }
 
-    BackHandler(enabled = !writeState.busy && isDirty) {
-        showDiscardConfirm = true
+    BackHandler(enabled = writeState.busy || isDirty) {
+        if (!writeState.busy && isDirty) {
+            showDiscardConfirm = true
+        }
     }
 
     LaunchedEffect(sessionId) {
@@ -134,6 +113,7 @@ fun EditEventScreen(
     EditEventContent(
         state = if (writeState.failed) state.copy(error = EditValidationError.WriteFailed) else state,
         busy = writeState.busy || state.error == EditValidationError.Loading,
+        backEnabled = !writeState.busy,
         teamNames = remember(teams) { teams.map { it.name } },
         onBack = requestBack,
         onEventTypeChange = viewModel::setEditEventType,
@@ -146,23 +126,32 @@ fun EditEventScreen(
         onTitleChange = { viewModel.updateEdit { s -> s.copy(title = it) } },
         onLocationChange = { viewModel.updateEdit { s -> s.copy(location = it) } },
         onNoteChange = { viewModel.updateEdit { s -> s.copy(note = it) } },
-        onPickStart = { pickingStart = true },
-        onPickEnd = { pickingEnd = true },
+        onPickStart = { if (!writeState.busy) pickingStart = true },
+        onPickEnd = { if (!writeState.busy) pickingEnd = true },
         onSave = { viewModel.saveEdit(onDone = onBack) },
-        onRequestDelete = { showDeleteConfirm = true },
-        onRequestDeleteTeam = { teamToDelete = it },
+        onRequestDelete = { if (!writeState.busy && state.loadedId != 0L) showDeleteConfirm = true },
+        onRequestDeleteTeam = { if (!writeState.busy) teamToDelete = it },
     )
 
     if (showDiscardConfirm) {
         AlertDialog(
-            onDismissRequest = { showDiscardConfirm = false },
+            onDismissRequest = { if (!writeState.busy) showDiscardConfirm = false },
+            properties = DialogProperties(
+                dismissOnBackPress = !writeState.busy,
+                dismissOnClickOutside = !writeState.busy,
+            ),
             title = { Text(stringResource(R.string.edit_discard_title)) },
             text = { Text(stringResource(R.string.edit_discard_message)) },
             confirmButton = {
-                TextButton(onClick = {
-                    showDiscardConfirm = false
-                    onBack()
-                }) {
+                TextButton(
+                    enabled = !writeState.busy,
+                    onClick = {
+                        if (!writeState.busy) {
+                            showDiscardConfirm = false
+                            onBack()
+                        }
+                    },
+                ) {
                     Text(
                         stringResource(R.string.edit_discard_confirm),
                         color = MaterialTheme.colorScheme.error,
@@ -170,7 +159,10 @@ fun EditEventScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDiscardConfirm = false }) {
+                TextButton(
+                    enabled = !writeState.busy,
+                    onClick = { if (!writeState.busy) showDiscardConfirm = false },
+                ) {
                     Text(stringResource(R.string.edit_discard_cancel))
                 }
             },
@@ -179,14 +171,23 @@ fun EditEventScreen(
 
     teamToDelete?.let { name ->
         AlertDialog(
-            onDismissRequest = { teamToDelete = null },
+            onDismissRequest = { if (!writeState.busy) teamToDelete = null },
+            properties = DialogProperties(
+                dismissOnBackPress = !writeState.busy,
+                dismissOnClickOutside = !writeState.busy,
+            ),
             title = { Text(stringResource(R.string.edit_delete_team_title)) },
             text = { Text(stringResource(R.string.edit_delete_team_message, name)) },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteTeam(name)
-                    teamToDelete = null
-                }) {
+                TextButton(
+                    enabled = !writeState.busy,
+                    onClick = {
+                        if (!writeState.busy) {
+                            teamToDelete = null
+                            viewModel.deleteTeam(name)
+                        }
+                    },
+                ) {
                     Text(
                         stringResource(R.string.action_delete),
                         color = MaterialTheme.colorScheme.error,
@@ -194,7 +195,10 @@ fun EditEventScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { teamToDelete = null }) {
+                TextButton(
+                    enabled = !writeState.busy,
+                    onClick = { if (!writeState.busy) teamToDelete = null },
+                ) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -205,6 +209,7 @@ fun EditEventScreen(
         TimePickerDialog(
             title = stringResource(R.string.edit_pick_start),
             initialMinutes = state.startMinutes,
+            enabled = !writeState.busy,
             onConfirm = {
                 viewModel.setStartMinutes(it)
                 pickingStart = false
@@ -216,6 +221,7 @@ fun EditEventScreen(
         TimePickerDialog(
             title = stringResource(R.string.edit_pick_end),
             initialMinutes = state.endMinutes,
+            enabled = !writeState.busy,
             onConfirm = {
                 viewModel.setEndMinutes(it)
                 pickingEnd = false
@@ -227,14 +233,21 @@ fun EditEventScreen(
     if (showDeleteConfirm && eventId != null) {
         val label = state.effectiveTeamNames().joinToString(" / ").ifBlank { state.title }
         AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
+            onDismissRequest = { if (!writeState.busy) showDeleteConfirm = false },
+            properties = DialogProperties(
+                dismissOnBackPress = !writeState.busy,
+                dismissOnClickOutside = !writeState.busy,
+            ),
             title = { Text(stringResource(R.string.edit_delete_event_title)) },
             text = { Text(stringResource(R.string.edit_delete_event_message, label)) },
             confirmButton = {
                 TextButton(
+                    enabled = !writeState.busy,
                     onClick = {
-                        showDeleteConfirm = false
-                        viewModel.delete(eventId, onDone = onBack)
+                        if (!writeState.busy) {
+                            showDeleteConfirm = false
+                            viewModel.delete(eventId, onDone = onBack)
+                        }
                     },
                 ) {
                     Text(
@@ -244,7 +257,10 @@ fun EditEventScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
+                TextButton(
+                    enabled = !writeState.busy,
+                    onClick = { if (!writeState.busy) showDeleteConfirm = false },
+                ) {
                     Text(stringResource(R.string.action_cancel))
                 }
             },
@@ -257,6 +273,7 @@ fun EditEventScreen(
 private fun EditEventContent(
     state: EditUiState,
     busy: Boolean = false,
+    backEnabled: Boolean = true,
     teamNames: List<String>,
     onBack: () -> Unit,
     onEventTypeChange: (EventType) -> Unit,
@@ -287,7 +304,7 @@ private fun EditEventContent(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, enabled = backEnabled) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.cd_back),
@@ -407,6 +424,7 @@ private fun EditEventContent(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .combinedClickable(
+                                    enabled = !busy,
                                     onClick = { onToggleTeam(candidate) },
                                     onLongClick = {
                                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
@@ -441,7 +459,7 @@ private fun EditEventContent(
                     trailingIcon = {
                         IconButton(
                             onClick = onAddTeam,
-                            enabled = state.teamInput.isNotBlank(),
+                            enabled = !busy && state.teamInput.isNotBlank(),
                         ) {
                             Icon(
                                 Icons.Default.Add,
@@ -496,12 +514,14 @@ private fun EditEventContent(
                     TimeField(
                         label = stringResource(R.string.edit_label_start),
                         minutes = state.startMinutes,
+                        enabled = !busy,
                         onClick = { if (!busy) onPickStart() },
                         modifier = Modifier.weight(1f),
                     )
                     TimeField(
                         label = stringResource(R.string.edit_label_end),
                         minutes = state.endMinutes,
+                        enabled = !busy,
                         onClick = { if (!busy) onPickEnd() },
                         modifier = Modifier.weight(1f),
                     )
@@ -566,7 +586,7 @@ private fun EditEventContent(
                 // 已有事件：底部放删除（ destructive 风格），与右上角保存互换。
                 Button(
                     onClick = onRequestDelete,
-                    enabled = !busy,
+                    enabled = !busy && state.loadedId != 0L,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -613,11 +633,12 @@ private fun TimeField(
     minutes: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Surface(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(12.dp),
     ) {
@@ -654,6 +675,7 @@ private fun TimeField(
 private fun TimePickerDialog(
     title: String,
     initialMinutes: Int,
+    enabled: Boolean = true,
     onConfirm: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -663,16 +685,26 @@ private fun TimePickerDialog(
         is24Hour = true,
     )
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (enabled) onDismiss() },
+        properties = DialogProperties(
+            dismissOnBackPress = enabled,
+            dismissOnClickOutside = enabled,
+        ),
         title = { Text(title) },
         text = { TimePicker(state = pickerState) },
         confirmButton = {
-            TextButton(onClick = { onConfirm(pickerState.hour * 60 + pickerState.minute) }) {
+            TextButton(
+                enabled = enabled,
+                onClick = { if (enabled) onConfirm(pickerState.hour * 60 + pickerState.minute) },
+            ) {
                 Text(stringResource(R.string.action_confirm))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                enabled = enabled,
+                onClick = { if (enabled) onDismiss() },
+            ) {
                 Text(stringResource(R.string.action_cancel))
             }
         },

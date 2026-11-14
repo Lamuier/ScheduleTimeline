@@ -3,9 +3,9 @@ package com.lamuier.scheduletimeline.ui.timeline
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.core.net.toUri
 
 /**
  * 各厂商「后台保活 / 自启动 / 电池优化」设置页引导。
@@ -22,19 +22,20 @@ import android.widget.Toast
  */
 object BackgroundRestrictionHelper {
 
-    /** 厂商匹配结果：含本地化标签、可跳转的设置页 Intent、回退网页 URL。 */
-    private data class Guide(
-        val label: String,
+    /** 厂商匹配结果：含可跳转的设置页 Intent 与回退网页 URL。 */
+    internal data class Guide(
         val intent: Intent? = null,
         val webUrl: String,
     )
 
     /** 当前设备的厂商引导，未识别时 webUrl 指向 dontkillmyapp 首页。 */
-    private fun guideFor(manufacturer: String = Build.MANUFACTURER): Guide {
+    internal fun guideFor(
+        manufacturer: String = Build.MANUFACTURER,
+        packageName: String = "",
+    ): Guide {
         val m = manufacturer.lowercase().trim()
         return when {
             m == "xiaomi" || m == "redmi" -> Guide(
-                label = "小米 / Redmi",
                 intent = Intent().setComponent(
                     ComponentName(
                         "com.miui.securitycenter",
@@ -45,7 +46,6 @@ object BackgroundRestrictionHelper {
             )
 
             m == "huawei" -> Guide(
-                label = "华为",
                 intent = Intent().setComponent(
                     ComponentName(
                         "com.huawei.systemmanager",
@@ -56,7 +56,6 @@ object BackgroundRestrictionHelper {
             )
 
             m == "honor" -> Guide(
-                label = "荣耀",
                 // MagicOS / Magic UI 沿用华为系统管家包名
                 intent = Intent().setComponent(
                     ComponentName(
@@ -68,7 +67,6 @@ object BackgroundRestrictionHelper {
             )
 
             m == "samsung" -> Guide(
-                label = "三星",
                 intent = Intent().setComponent(
                     ComponentName(
                         "com.samsung.android.lool",
@@ -79,7 +77,6 @@ object BackgroundRestrictionHelper {
             )
 
             m == "oppo" || m == "realme" -> Guide(
-                label = if (m == "realme") "realme" else "OPPO",
                 intent = Intent().setComponent(
                     ComponentName(
                         "com.coloros.safecenter",
@@ -90,7 +87,6 @@ object BackgroundRestrictionHelper {
             )
 
             m == "vivo" || m == "iqoo" -> Guide(
-                label = "vivo / iQOO",
                 intent = Intent().setComponent(
                     ComponentName(
                         "com.iqoo.secure",
@@ -101,7 +97,6 @@ object BackgroundRestrictionHelper {
             )
 
             m == "oneplus" -> Guide(
-                label = "一加",
                 // ColorOS 体系，沿用 OPPO 安全中心
                 intent = Intent().setComponent(
                     ComponentName(
@@ -113,18 +108,15 @@ object BackgroundRestrictionHelper {
             )
 
             m == "meizu" -> Guide(
-                label = "魅族",
-                intent = Intent().setComponent(
-                    ComponentName(
-                        "com.meizu.safe",
-                        "com.meizu.safe.security.SHOW_APPSEC",
-                    ),
-                ),
+                intent = Intent("com.meizu.safe.security.SHOW_APPSEC").apply {
+                    if (packageName.isNotEmpty()) {
+                        putExtra("packageName", packageName)
+                    }
+                },
                 webUrl = "https://dontkillmyapp.com/meizu",
             )
 
             else -> Guide(
-                label = manufacturer,
                 webUrl = "https://dontkillmyapp.com",
             )
         }
@@ -140,7 +132,7 @@ object BackgroundRestrictionHelper {
         context: Context,
         fallbackToastResId: Int,
     ) {
-        val guide = guideFor()
+        val guide = guideFor(packageName = context.packageName)
         val intent = guide.intent?.apply {
             // 跳到的是系统设置页，不需要本应用额外声明权限
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -154,7 +146,7 @@ object BackgroundRestrictionHelper {
 
         // Intent 失败或未识别 → 浏览器打开网页
         Toast.makeText(context, fallbackToastResId, Toast.LENGTH_SHORT).show()
-        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse(guide.webUrl)).apply {
+        val webIntent = Intent(Intent.ACTION_VIEW, guide.webUrl.toUri()).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { context.startActivity(webIntent) }

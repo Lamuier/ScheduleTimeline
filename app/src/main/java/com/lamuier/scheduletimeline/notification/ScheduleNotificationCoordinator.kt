@@ -14,7 +14,6 @@ import com.lamuier.scheduletimeline.data.ScheduledReminder
 import com.lamuier.scheduletimeline.data.BoundarySchedule
 import com.lamuier.scheduletimeline.data.key
 import com.lamuier.scheduletimeline.widget.ScheduleWidgetUpdater
-import android.net.Uri
 import android.Manifest
 import android.app.AlarmManager
 import android.app.Notification
@@ -27,7 +26,9 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import com.lamuier.scheduletimeline.MainActivity
 import com.lamuier.scheduletimeline.R
 import com.lamuier.scheduletimeline.data.EventLabels
@@ -47,6 +48,45 @@ import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.max
 
+internal const val PROGRESS_MAX = 1000
+
+/** Scales elapsed window progress in [Long] to `0..maxProgress` without `Long -> Int` overflow. */
+internal fun scaledProgress(
+    startMillis: Long,
+    endMillis: Long,
+    nowMillis: Long,
+    maxProgress: Int = PROGRESS_MAX,
+): Int {
+    if (maxProgress <= 0 || endMillis <= startMillis || nowMillis <= startMillis) return 0
+    if (nowMillis >= endMillis) return maxProgress
+    val duration = endMillis - startMillis
+    val elapsed = nowMillis - startMillis
+    val scaled = if (duration > 0L && duration <= Long.MAX_VALUE / maxProgress && elapsed >= 0L) {
+        (elapsed * maxProgress) / duration
+    } else {
+        ((nowMillis.toDouble() - startMillis.toDouble()) /
+            (endMillis.toDouble() - startMillis.toDouble()) * maxProgress).toLong()
+    }
+    return scaled.toInt().coerceIn(0, maxProgress)
+}
+
+internal fun hasNotificationPermission(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+
+internal fun areAppNotificationsEnabled(context: Context): Boolean {
+    if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+    val manager = context.getSystemService(NotificationManager::class.java) ?: return true
+    val channels = manager.notificationChannels
+    return channels.isEmpty() || channels.any { it.importance != NotificationManager.IMPORTANCE_NONE }
+}
+
+internal fun hasSystemNotificationAccess(context: Context): Boolean =
+    hasNotificationPermission(context) && areAppNotificationsEnabled(context)
+
 class ScheduleNotificationCoordinator(
     context: Context,
     private val repository: ScheduleRepository,
@@ -61,7 +101,7 @@ class ScheduleNotificationCoordinator(
     private val zone get() = refreshZone
     private val mutex = Mutex()
     private val reminderStore = ReminderStore(appContext)
-    private val dateFormatter = DateTimeFormatter.ofPattern(
+    private fun dateFormatter(): DateTimeFormatter = DateTimeFormatter.ofPattern(
         appContext.getString(R.string.date_pattern),
     )
     /**
@@ -179,7 +219,7 @@ class ScheduleNotificationCoordinator(
         val text = when (kind) {
             ReminderKind.THREE_DAYS_BEFORE -> appContext.getString(
                 R.string.notification_reminder_text_three_days,
-                start.toLocalDate().format(dateFormatter),
+                start.toLocalDate().format(dateFormatter()),
                 startTime,
             )
             ReminderKind.DAY_OF_MIDNIGHT -> appContext.getString(
@@ -198,7 +238,8 @@ class ScheduleNotificationCoordinator(
         val contentIntent = PendingIntent.getActivity(
             appContext,
             REMINDER_CONTENT_REQUEST_CODE,
-            launchIntent.setAction("${appContext.packageName}.OPEN_REMINDER").setData(Uri.parse("schedule://reminder/${event.id}")),
+            launchIntent.setAction("${appContext.packageName}.OPEN_REMINDER")
+                .setData("schedule://reminder/${event.id}".toUri()),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -231,7 +272,6 @@ class ScheduleNotificationCoordinator(
         Icon.createWithResource(appContext, R.drawable.ic_island)
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         // Channel importance is locked by the system once a channel is created, so the
         // legacy DEFAULT channel can never be upgraded in place. Drop it and recreate
         // under a new id: Xiaomi focus notifications / HyperIsland only attach to
@@ -250,7 +290,6 @@ class ScheduleNotificationCoordinator(
     }
 
     private fun ensureReminderChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         notificationManager.createNotificationChannel(
             NotificationChannel(
                 REMINDER_CHANNEL_ID,
@@ -265,16 +304,7 @@ class ScheduleNotificationCoordinator(
         )
     }
 
-    private fun canPostNotifications(): Boolean {
-        return hasNotificationPermission() && notificationManager.areNotificationsEnabled()
-    }
-
-    private fun hasNotificationPermission(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                appContext,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
+    private fun canPostNotifications(): Boolean = hasSystemNotificationAccess(appContext)
 
     private fun postLiveUpdate(
         events: List<ScheduleEvent>,
@@ -302,7 +332,7 @@ class ScheduleNotificationCoordinator(
             appContext.getString(
                 R.string.notification_live_upcoming_content,
                 labels,
-                Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate().format(dateFormatter),
+                Instant.ofEpochMilli(startMillis).atZone(zone).toLocalDate().format(dateFormatter()),
                 Instant.ofEpochMilli(startMillis).atZone(zone).toLocalTime().let {
                     TimeFormat.minutesToHm(it.hour * 60 + it.minute)
                 },
@@ -349,13 +379,12 @@ class ScheduleNotificationCoordinator(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val badgedText = text
         val builder = Notification.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(islandLargeIcon())
             .setContentTitle(title)
-            .setContentText(badgedText)
-            .setStyle(Notification.BigTextStyle().bigText(badgedText))
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(contentIntent)
             .setCategory(Notification.CATEGORY_EVENT)
             // 行程属敏感个人信息：锁屏隐藏团队名与时间等详情，仅显示脱敏公开版
@@ -374,9 +403,8 @@ class ScheduleNotificationCoordinator(
                 max(1L, if (upcoming) startMillis - nowMillis else endMillis - nowMillis),
             )
 
-        val durationMs = max(1, (endMillis - startMillis).toInt())
-        val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
-        builder.setProgress(durationMs, progressMs, false)
+        val progress = scaledProgress(startMillis, endMillis, nowMillis)
+        builder.setProgress(PROGRESS_MAX, progress, false)
         addTokutenCompleteActions(builder, events, upcoming)
         applyAndroid16LiveUpdate(
             builder = builder,
@@ -397,7 +425,6 @@ class ScheduleNotificationCoordinator(
             title = title,
             content = text,
             events = events,
-            startMillis = startMillis,
             upcoming = upcoming,
         )
         runCatching { notificationManager.notify(LIVE_NOTIFICATION_ID, notification) }
@@ -482,11 +509,10 @@ class ScheduleNotificationCoordinator(
     ) {
         if (Build.VERSION.SDK_INT < 36) return
 
-        val durationMs = max(1, (endMillis - startMillis).toInt())
-        val progressMs = (nowMillis - startMillis).toInt().coerceIn(0, durationMs)
-        val segment = Notification.ProgressStyle.Segment(durationMs)
+        val progress = scaledProgress(startMillis, endMillis, nowMillis)
+        val segment = Notification.ProgressStyle.Segment(PROGRESS_MAX)
         val progressStyle = Notification.ProgressStyle()
-            .setProgress(progressMs)
+            .setProgress(progress)
             .addProgressSegment(segment)
 
         builder.setStyle(progressStyle)
@@ -612,16 +638,11 @@ class ScheduleNotificationCoordinator(
         alarmManager.cancel(reminderPendingIntent())
     }
 
-    private fun reminderPendingIntent(
-        eventId: Long = -1L,
-        kind: ReminderKind? = null,
-    ): PendingIntent = PendingIntent.getBroadcast(
+    private fun reminderPendingIntent(): PendingIntent = PendingIntent.getBroadcast(
         appContext,
         REMINDER_ALARM_REQUEST_CODE,
         Intent(appContext, ScheduleAlarmReceiver::class.java)
-            .setAction(ACTION_REMINDER)
-            .putExtra(EXTRA_EVENT_ID, eventId)
-            .putExtra(EXTRA_REMINDER_KIND, kind?.ordinal ?: -1),
+            .setAction(ACTION_REMINDER),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -630,16 +651,10 @@ class ScheduleNotificationCoordinator(
         COMPLETE_REQUEST_CODE_BASE + eventId.toInt(),
         Intent(appContext, ScheduleAlarmReceiver::class.java)
             .setAction(ACTION_COMPLETE)
-            .setData(Uri.parse("schedule://complete/$eventId"))
+            .setData("schedule://complete/$eventId".toUri())
             .putExtra(EXTRA_EVENT_ID, eventId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
-
-    private fun cancelRemindersFor(eventId: Long) {
-        ReminderKind.entries.forEach { kind ->
-            notificationManager.cancel(reminderNotificationId(eventId, kind))
-        }
-    }
 
     private fun reminderNotificationId(eventId: Long, kind: ReminderKind): Int =
         REMINDER_NOTIFICATION_ID_BASE +
@@ -651,7 +666,6 @@ class ScheduleNotificationCoordinator(
         const val ACTION_REMINDER = "com.lamuier.scheduletimeline.action.SCHEDULE_REMINDER"
         const val ACTION_COMPLETE = "com.lamuier.scheduletimeline.action.COMPLETE_TOKUTEN"
         const val EXTRA_EVENT_ID = "extra_event_id"
-        const val EXTRA_REMINDER_KIND = "extra_reminder_kind"
         const val LIVE_NOTIFICATION_ID = 4101
         private const val EXTRA_REQUEST_PROMOTED_ONGOING = "android.requestPromotedOngoing"
         private const val CHANNEL_ID = "schedule_live_updates_v2"

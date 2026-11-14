@@ -7,7 +7,6 @@
     <string name="cd_add_event">添加日程</string>
     <string name="cd_add_team">添加团队</string>
     <string name="cd_back">返回</string>
-    <string name="cd_delete">删除</string>
     <string name="cd_edit_event">编辑日程</string>
     <string name="cd_more">更多</string>
     <string name="cd_prev_day">前一天</string>
@@ -20,8 +19,6 @@
     <string name="action_delete">删除</string>
     <string name="action_import">开始导入</string>
     <string name="action_save_event">保存日程</string>
-    <string name="action_export">导出当日 CSV</string>
-    <string name="action_clear_all">清空全部数据</string>
     <string name="action_back_to_today">返回今天</string>
     <string name="action_jump_to_now">当前时间</string>
     <string name="cd_jump_to_now">跳到当前时间轴</string>
@@ -105,8 +102,6 @@
     <string name="import_preview_selected">已选 %1$d / %2$d 条</string>
     <string name="import_select_all">全选</string>
     <string name="import_select_none">全不选</string>
-    <string name="import_invalid_format">格式错误或时间无效</string>
-    <string name="action_parse">解析文本</string>
     <string name="import_hint">每行一条，逗号分隔；日期为 yyyy-MM-dd；特典多个团队用 / 分隔</string>
     <string name="import_format_fields">日期 · 团队（可多项） · 类型 · 特典种类 · 场次说明 · 地点 · 开始 · 结束 · 备注（均可按列留空）</string>
     <string name="import_ai_prompt_title">用 AI 把时间表转成表格</string>
@@ -172,7 +167,6 @@
     <string name="widget_empty_today_hint">今日无日程，点击添加</string>
     <string name="widget_date_with_weekday">%1$s %2$s</string>
     <string name="widget_small_date_format">M/d</string>
-    <string name="widget_upcoming_later">%1$s %2$s 开始</string>
     <string name="widget_small_description">查看当前进行中或下一项日程</string>
     <string name="widget_large_description">展示今日全部日程</string>
     <!-- 小组件选择器里的预览：固定示例数据，不读取真实日程 -->

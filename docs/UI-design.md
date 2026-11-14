@@ -7,16 +7,16 @@
 ## 1. 设计原则
 
 1. **时间优先**：主屏以当日时间轴为核心；次要操作（主题、导入导出、清空）收进菜单 / 底栏，不抢主视觉。
-2. **一眼可扫**：日程块用分类色区分；空闲与冲突用固定语义色，不靠文案才能辨认。
+2. **一眼可扫**：日程块用类型色区分；空闲与冲突用固定语义色，不靠文案才能辨认。
 3. **轻量本地**：无账户、无云同步 UI；避免「仪表盘感」——不要堆统计卡片、多 Tab 首页。
 4. **Material 3 为本**：组件优先用 M3；时间轴线与卡片色保持与主题色一致。
-5. **深浅双主题**：浅色 / 深色 / 跟随系统均可用；分类色在深色下用 `adaptTo(dark)`，禁止写死仅浅色可读的对比。
+5. **深浅双主题**：浅色 / 深色 / 跟随系统均可用；类型色在深色下用 `adaptTo(dark)`，禁止写死仅浅色可读的对比。
 
 ---
 
 ## 2. 色彩
 
-定义位置：`app/.../ui/theme/Theme.kt`。新增语义色放此处，勿在 Composable 里散落魔法色值（图表/分类算法内哈希取色除外）。
+定义位置：`app/.../ui/theme/Theme.kt`。新增语义色放此处，勿在 Composable 里散落魔法色值。
 
 ### 品牌与语义
 
@@ -43,12 +43,12 @@
 
 深色方案以 `DarkColors` 为准；状态栏 / 导航栏外观随 `LocalDarkTheme` 切换。Android 12+ 支持开启动态配色（Material You），随系统壁纸色调智能调整基础色阶。
 
-### 分类色
+### 日程类型色
 
-- 使用 `categoryColors(name)` + `adaptTo(dark)`。
-- 常见分类有固定索引（舞台演出、特典、物贩等）；其余按名称哈希稳定取色。
-- 日程块：`container` 为底、`onContainer` 为字、`accent` 为左边条 / 强调点。
-- **不要**为单个分类在 UI 文件里单独硬编码颜色。
+- 使用 `eventTypeColors(event)` / `eventTypeColors(type)` + `adaptTo(dark)`（从 `CategoryPalette` 取色）。
+- 固定映射：演出取紫色（`CategoryPalette[0]`）；特典按种类区分——前特青色（`[1]`）、平特 / 未指定粉色（`[2]`）、终特蓝色（`[5]`）。
+- 日程卡片：`EventCard` 以 `accent.copy(alpha = if (dark) 0.18f else 0.12f)` 为底（已完成特典额外乘以 `0.62f` 透明系数），`accent` 作时间、边框与类型圆标强调色；重叠内条与导入预览行以 `container` 为底、`onContainer` 为字、`accent` 为强调。
+- **不要**在 UI 文件里为单个日程类型单独硬编码颜色。
 
 ---
 
@@ -129,7 +129,7 @@
 
 | 元素 | 表现 |
 |---|---|
-| 日程事件 | 分类色容器；列表卡片 |
+| 日程事件 | `eventTypeColors(event)` 类型色容器；列表卡片 |
 | 空闲 | `OrangeGap` / secondary；文案带时长 |
 | 重叠冲突 | 警告色 + 简短提示（Warning 图标可用 core 的 `Warning`） |
 | 切日 | 左右拖动主内容时实时跟手，顶栏日期与返回今天按钮同步可见页；越过阈值完成切换，否则回弹；箭头保留 180ms 方向过渡，返回今天、最近日程与 DatePicker 立即定位 |
@@ -159,14 +159,14 @@ ui/
 ## 8. 无障碍与文案
 
 - 可点击图标必须有 `contentDescription`（装饰性图标可为 `null`）。
-- 对比度：主文字 / 按钮文字在浅色与深色下均需可读；分类 `onContainer` 勿随意改浅。
+- 对比度：主文字 / 按钮文字在浅色与深色下均需可读；类型色 `onContainer` 与 `accent` 对比度勿随意改浅。
 - 中文文案统一简体；语气简洁、操作结果可预期（「清空全部数据」而非含糊的「重置」）。
 
 ---
 
 ## 9. 改 UI 时的检查清单
 
-- [ ] 颜色来自 `Theme.kt` / `MaterialTheme.colorScheme` / `categoryColors`
+- [ ] 颜色来自 `Theme.kt` / `MaterialTheme.colorScheme` / `eventTypeColors`
 - [ ] 深色模式目视过一遍（或 Preview 双主题）
 - [ ] 文案与 contentDescription 在 `strings.xml`
 - [ ] 未引入 `material-icons-extended`

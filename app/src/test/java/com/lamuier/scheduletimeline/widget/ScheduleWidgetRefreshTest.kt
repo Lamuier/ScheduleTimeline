@@ -4,7 +4,11 @@ import android.app.Application
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.RemoteViews
+import android.widget.TextView
 import android.app.AlarmManager
 import android.app.NotificationManager
 import androidx.room.Room
@@ -113,6 +117,96 @@ class ScheduleWidgetRefreshTest {
         assertEquals(2, shadow.updates); assertEquals(1, shadow.reloads)
         assertTrue(1 in shadow.lastViews)
     }
+
+    @Test fun changingNoteOrCompletedDoesNotReloadWidgetList() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val shadow = Shadow.extract<RecordingWidgetManager>(AppWidgetManager.getInstance(app))
+        shadow.addBoundWidget(1, AppWidgetProviderInfo().apply {
+            provider = ComponentName(app, ScheduleWidgetProviderLarge::class.java)
+        })
+        val targets = ScheduleWidgetUpdater.targets(app)
+        val base = ScheduleEvent(
+            id = 1,
+            team = "StarDiary",
+            dayKey = "2026-10-15",
+            startMinutes = 600,
+            endMinutes = 660,
+            note = "initial",
+            completed = false,
+        )
+        suspend fun refresh(events: List<ScheduleEvent>) {
+            val snapshot = NotificationSchedule.snapshot(
+                events,
+                Instant.parse("2026-10-15T12:00:00Z").toEpochMilli(),
+                ZoneOffset.UTC,
+            )
+            ScheduleWidgetUpdater.refresh(app, events, snapshot, targets, force = false)
+        }
+
+        refresh(listOf(base))
+        assertEquals(1, shadow.reloads)
+
+        refresh(listOf(base.copy(note = "edited", completed = true)))
+        assertEquals(1, shadow.reloads)
+
+        refresh(listOf(base.copy(team = "StarDiaryUpdated")))
+        assertEquals(2, shadow.reloads)
+    }
+
+    @Test fun smallWidgetDisplaysTodayUpcomingStartTime() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val shadow = Shadow.extract<RecordingWidgetManager>(AppWidgetManager.getInstance(app))
+        shadow.addBoundWidget(1, AppWidgetProviderInfo().apply {
+            provider = ComponentName(app, ScheduleWidgetProviderSmall::class.java)
+        })
+        val targets = ScheduleWidgetUpdater.targets(app)
+        val events = listOf(
+            ScheduleEvent(
+                id = 7,
+                team = "StarDiary",
+                dayKey = "2026-10-15",
+                startMinutes = 600,
+                endMinutes = 660,
+            ),
+        )
+        val snapshot = NotificationSchedule.snapshot(
+            events,
+            Instant.parse("2026-10-15T09:00:00Z").toEpochMilli(),
+            ZoneOffset.UTC,
+        )
+        ScheduleWidgetUpdater.refresh(app, events, snapshot, targets, force = true)
+        val applied = shadow.lastViews[1]!!.apply(app, FrameLayout(app))
+        val density = app.resources.displayMetrics.density
+        val w = (180 * density).toInt()
+        val h = (70 * density).toInt()
+        applied.measure(
+            View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY),
+        )
+        applied.layout(0, 0, w, h)
+        applied.collectVisibleTextViews().forEach { tv ->
+            assertEquals("Truncated text: ${tv.text}", 0, tv.layout?.getEllipsisCount(0) ?: 0)
+            val pos = IntArray(2).also { tv.getLocationInWindow(it) }
+            assertTrue("Clipped vertically: ${tv.text}", pos[1] + tv.height <= h)
+        }
+        val texts = applied.collectTexts()
+        assertTrue(texts.contains("下一项"))
+        assertTrue(texts.contains("StarDiary演"))
+        assertTrue(texts.contains("10:00"))
+    }
+}
+
+private fun View.collectVisibleTextViews(): List<TextView> = when {
+    visibility != View.VISIBLE -> emptyList()
+    this is TextView -> listOf(this)
+    this is ViewGroup -> (0 until childCount).flatMap { getChildAt(it).collectVisibleTextViews() }
+    else -> emptyList()
+}
+
+private fun View.collectTexts(): List<String> = when (this) {
+    is TextView -> listOf(text.toString())
+    is ViewGroup -> (0 until childCount).flatMap { getChildAt(it).collectTexts() }
+    else -> emptyList()
 }
 
 @Implements(AppWidgetManager::class)

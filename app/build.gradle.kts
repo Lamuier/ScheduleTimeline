@@ -28,8 +28,8 @@ android {
         applicationId = "com.lamuier.scheduletimeline"
         minSdk = 26
         targetSdk = 37
-        versionCode = 32
-        versionName = "1.16.0"
+        versionCode = 33
+        versionName = "1.16.1"
         ndk {
             abiFilters += setOf("arm64-v8a")
         }
@@ -83,8 +83,8 @@ android {
     }
 
     androidResources {
-        // 与 locales_config.xml 声明一致：仅保留中英文，裁掉依赖库携带的 80+ 种语言翻译
-        localeFilters += listOf("zh", "en")
+        // 与 locales_config.xml 声明一致：仅保留中文资源，裁掉依赖库携带的 80+ 种语言翻译
+        localeFilters += listOf("zh")
     }
 
     packaging {
