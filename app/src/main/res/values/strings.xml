@@ -63,9 +63,9 @@
     <string name="theme_dynamic_color_summary">跟随系统壁纸色调（Material You，Android 12+）</string>
     <string name="notification_section">通知</string>
     <string name="notification_toggle_title">日程实时通知</string>
-    <string name="notification_toggle_summary">日程开始时提醒，并持续显示当前进度；Android 16 支持 Live Updates</string>
+    <string name="notification_toggle_summary">从当天第一项开始持续显示到最后一项结束，空档显示下一项倒计时；Android 16 支持 Live Updates</string>
     <string name="notification_always_on_title">显示未来日程</string>
-    <string name="notification_always_on_summary">开启后，没有进行中的日程时显示下一项未来日程；关闭后只显示当前日程</string>
+    <string name="notification_always_on_summary">开启后，当天第一项开始前和最后一项结束后仍显示之后的日程；关闭后只覆盖当天这一段</string>
     <string name="background_keep_alive_title">后台保活设置</string>
     <string name="background_keep_alive_summary">通知不更新或开机后失效？打开本机厂商设置页，把追程加入自启动与电池白名单</string>
     <string name="background_keep_alive_fallback_toast">未识别到厂商设置页，已打开在线教程</string>
@@ -103,7 +103,7 @@
     <string name="import_select_all">全选</string>
     <string name="import_select_none">全不选</string>
     <string name="import_hint">每行一条，逗号分隔；日期为 yyyy-MM-dd；特典多个团队用 / 分隔</string>
-    <string name="import_format_fields">日期 · 团队（可多项） · 类型 · 特典种类 · 场次说明 · 地点 · 开始 · 结束 · 备注（均可按列留空）</string>
+    <string name="import_format_fields">日期（留空用当前查看日）· 团队（必填，可多项）· 类型（必填）· 特典种类（可留空）· 场次说明（可留空）· 地点（可留空）· 开始（必填）· 结束（必填）· 备注（可留空）· 完成（可留空）</string>
     <string name="import_ai_prompt_title">用 AI 把时间表转成表格</string>
     <string name="import_ai_prompt_desc">复制提示词，连同时间表图片发给任意 AI，再把生成的表格粘回输入框</string>
     <string name="import_ai_prompt_copy">复制 AI 提示词</string>

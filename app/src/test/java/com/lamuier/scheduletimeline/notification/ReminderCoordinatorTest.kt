@@ -117,6 +117,52 @@ class ReminderCoordinatorTest {
         assertEquals(0, scaledProgress(end, start, start))
     }
 
+    @Test fun liveNotificationCoversTodayFromFirstItemUntilLastWithoutAlwaysOn() = runBlocking {
+        preferences.setAlwaysOn(false)
+        repository.save(ScheduleEvent(
+            team = "Morning", dayKey = "2026-10-20", startMinutes = 10 * 60, endMinutes = 11 * 60,
+        ))
+        repository.save(ScheduleEvent(
+            team = "Afternoon", dayKey = "2026-10-20", startMinutes = 14 * 60, endMinutes = 15 * 60,
+        ))
+
+        clock.now = instant("2026-10-20T09:00:00")
+        coordinator.refresh()
+        assertNull(liveNotification())
+
+        clock.now = instant("2026-10-20T10:30:00")
+        coordinator.refresh()
+        val ongoing = liveNotification()
+        assertNotNull(ongoing)
+        assertEquals(PROGRESS_MAX / 2, ongoing!!.extras.getInt(Notification.EXTRA_PROGRESS, -1))
+        assertFalse(ongoing.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
+
+        clock.now = instant("2026-10-20T12:00:00")
+        coordinator.refresh()
+        val gap = liveNotification()
+        assertNotNull(gap)
+        assertEquals(0, gap!!.extras.getInt(Notification.EXTRA_PROGRESS, -1))
+        assertTrue(gap.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
+        val soon = clock.millis() + 60_000L
+        assertTrue(shadowOf(alarms).scheduledAlarms.none { it.triggerAtMs <= soon })
+
+        clock.now = instant("2026-10-20T15:00:00")
+        coordinator.refresh()
+        assertNull(liveNotification())
+
+        preferences.setAlwaysOn(true)
+        clock.now = instant("2026-10-20T09:00:00")
+        coordinator.refresh()
+        val early = liveNotification()
+        assertNotNull(early)
+        assertEquals(0, early!!.extras.getInt(Notification.EXTRA_PROGRESS, -1))
+        assertTrue(early.extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN))
+    }
+
+    private fun liveNotification(): Notification? = manager.activeNotifications.firstOrNull {
+        it.id == ScheduleNotificationCoordinator.LIVE_NOTIFICATION_ID
+    }?.notification
+
     @Test fun upcomingOver25DaysAwayWithAlwaysOnPostsBoundedZeroProgress() = runBlocking {
         clock.now = instant("2026-10-01T10:00:00")
         preferences.setAlwaysOn(true)

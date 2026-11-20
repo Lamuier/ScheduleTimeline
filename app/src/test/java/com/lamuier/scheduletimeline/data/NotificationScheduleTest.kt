@@ -128,12 +128,45 @@ class NotificationScheduleTest {
     }
 
     @Test
+    fun sameDayGapUpcoming_coversSpanFromFirstStartUntilLastEnd() {
+        val events = listOf(event(1, 10 * 60, 11 * 60), event(2, 14 * 60, 15 * 60))
+        val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        assertEquals(null, snapshotAt(events, dayStart + 9 * 60 * 60_000L).sameDayGapUpcoming())
+        assertEquals(2L, snapshotAt(events, dayStart + 12 * 60 * 60_000L).sameDayGapUpcoming()!!.event.id)
+        assertEquals(null, snapshotAt(events, dayStart + (10 * 60 + 30) * 60_000L).sameDayGapUpcoming())
+        assertEquals(null, snapshotAt(events, dayStart + 15 * 60 * 60_000L).sameDayGapUpcoming())
+        assertEquals(null, snapshotAt(events, dayStart + 16 * 60 * 60_000L).sameDayGapUpcoming())
+    }
+
+    @Test
+    fun sameDayGapUpcoming_ignoresCompletedTokutenAndOtherDays() {
+        val tomorrow = date.plusDays(1)
+        val events = listOf(
+            event(1, 9 * 60, 10 * 60).copy(completed = true),
+            event(2, 14 * 60, 15 * 60),
+            event(3, 18 * 60, 19 * 60).copy(completed = true),
+            event(4, 8 * 60, 9 * 60).copy(dayKey = tomorrow.toString()),
+        )
+        val dayStart = date.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        // 已完成的 09:00 与 18:00 不计入跨度，12:00 仍在第一项（14:00）之前。
+        assertEquals(null, snapshotAt(events, dayStart + 12 * 60 * 60_000L).sameDayGapUpcoming())
+        // 次日 08:00 不把当天跨度拉过 15:00。
+        assertEquals(null, snapshotAt(events, dayStart + 16 * 60 * 60_000L).sameDayGapUpcoming())
+        assertEquals(4L, snapshotAt(events, dayStart + 16 * 60 * 60_000L).next!!.event.id)
+    }
+
+    @Test
     fun planner_skipsCompletedTokuten() {
         val events = listOf(event(1, 10 * 60, 11 * 60).copy(completed = true))
         val now = date.atStartOfDay(zone).toInstant().toEpochMilli() - 60 * 60_000L
 
         assertEquals(null, ReminderPlanner.plan(events, now, zone, ReminderState()).next)
     }
+
+    private fun snapshotAt(events: List<ScheduleEvent>, nowMillis: Long) =
+        NotificationSchedule.snapshot(events, nowMillis, zone)
 
     private fun event(id: Long, start: Int, end: Int) = ScheduleEvent(
         id = id,

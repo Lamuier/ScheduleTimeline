@@ -79,6 +79,11 @@ class ScheduleExportTest {
         assertTrue(prompt.contains("平特"))
         assertTrue(prompt.contains("终特"))
         assertTrue(prompt.contains(" / "))
+        assertFalse(prompt.contains("可为空但逗号不能省"))
+        assertTrue(prompt.contains("团队：必填"))
+        assertTrue(prompt.contains("类型：必填"))
+        assertTrue(prompt.contains("可以留空"))
+        assertTrue(prompt.contains("两项都要填写才能导入"))
     }
 
     @Test

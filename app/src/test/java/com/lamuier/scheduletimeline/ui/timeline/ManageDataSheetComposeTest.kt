@@ -108,6 +108,8 @@ class ManageDataSheetComposeTest {
             }
         }
 
+        compose.onNodeWithText("团队（必填，可多项）", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("均可按列留空").assertDoesNotExist()
         val headerBounds = compose.onNodeWithText("批量导入").fetchSemanticsNode().boundsInRoot
         val firstIssueBounds = compose.onNodeWithText("第 1 行：列数不正确").fetchSemanticsNode().boundsInRoot
         assertTrue(

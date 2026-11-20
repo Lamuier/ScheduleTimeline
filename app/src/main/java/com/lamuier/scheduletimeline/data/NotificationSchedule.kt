@@ -32,6 +32,25 @@ data class NotificationSnapshot(
 
     fun nextRefreshAt(intervalMs: Long): Long? = if (active.isNotEmpty())
         minOf(nextBoundary ?: Long.MAX_VALUE, nowMillis + intervalMs) else nextBoundary
+
+    /**
+     * 当天日程跨度内的空档下一项。
+     *
+     * 已经过当天第一项开始、尚未到最后一项结束，且当前没有进行中日程时，返回当天的下一项。
+     * 第一项开始前、最后一项结束时刻及之后、其他日期都不在此列。
+     * 已完成特典不进入 [windows]，不会提前或拉长这段跨度。
+     */
+    fun sameDayGapUpcoming(): ScheduledEventWindow? {
+        if (active.isNotEmpty()) return null
+        val todayKey = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate().toString()
+        val todayWindows = windows.filter { it.event.dayKey == todayKey }
+        if (todayWindows.isEmpty()) return null
+        val firstStart = todayWindows.minOf { it.startMillis }
+        val lastEnd = todayWindows.maxOf { it.endMillis }
+        if (nowMillis < firstStart || nowMillis >= lastEnd) return null
+        val upcoming = next ?: return null
+        return upcoming.takeIf { it.event.dayKey == todayKey && it.startMillis < lastEnd }
+    }
 }
 
 object NotificationSchedule {

@@ -160,11 +160,9 @@ class ScheduleNotificationCoordinator(
             reminderStore.write(decision.state)
             val active = snapshot.active
             if (active.isEmpty()) {
-                val upcoming = if (alwaysOn) {
-                    snapshot.next
-                } else {
-                    null
-                }
+                // 「显示未来日程」决定第一项开始前、最后一项结束后是否提前显示之后的日程。
+                // 当天跨度内的空档即使关闭该开关，也继续显示下一项倒计时。
+                val upcoming = if (alwaysOn) snapshot.next else snapshot.sameDayGapUpcoming()
                 if (upcoming == null) {
                     notificationManager.cancel(LIVE_NOTIFICATION_ID)
                 } else {
@@ -183,8 +181,8 @@ class ScheduleNotificationCoordinator(
                     endMillis = active.maxOf { it.endMillis },
                     nowMillis = now,
                     upcoming = false,
-                    // 进行中通知的详情始终预告下一项，与「显示未来日程」开关无关——
-                    // 开关只决定空档期是否单独发通知。
+                    // 进行中通知的详情始终预告下一项。「显示未来日程」只决定
+                    // 当天第一项开始前、最后一项结束后是否单独发通知。
                     next = snapshot.next,
                 )
             }
